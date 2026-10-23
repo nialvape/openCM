@@ -1,0 +1,21 @@
+# Copy this folder to projects/<id>/ (gitignored) and fill it in. `id` must match the folder name.
+id: _template
+repo: owner/name
+branch: main
+# Language and variant of everything the agent publishes, e.g. "es-AR (Rioplatense, voseo)" or "en-US".
+language: en-US
+
+channels:
+  x:
+    # reply: link goes in a reply (a post with a URL costs $0.20 vs $0.015) · inline · none
+    linkPolicy: reply
+
+# Changes that never deserve content. Checked before any model is called.
+prefilter:
+  ignorePaths: [".github/**", "**/*.lock", "package-lock.json", "**/*.test.*", "docs/**"]
+  ignoreLabels: ["chore", "ci", "dependencies"]
+
+# Anything from config/default.yaml can be overridden here, e.g.:
+harness: {}
+#  roles:
+#    writer: { model: openai:gpt-6.1-sol }

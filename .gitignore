@@ -1,0 +1,7 @@
+node_modules/
+build/
+.env
+data/
+# Everything particular to a tracked repo stays local; only the template is committed.
+projects/*
+!projects/_template/

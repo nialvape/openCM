@@ -1,0 +1,50 @@
+# Harness defaults. A project overrides any key in projects/<id>/project.yaml under `harness:`.
+# Behavior lives here, not in prompt prose: models, tool allowlists and budgets are enforced in code.
+
+# Model ids are "<provider>:<model>". Providers: openrouter (default; ids are "<vendor>/<model>" from
+# https://openrouter.ai/models), anthropic, openai, google (direct APIs).
+# The critic uses a different model family than the writer on purpose (same-family judges favor their own output).
+roles:
+  analyst:
+    model: openrouter:~z-ai/glm-latest
+    tools: [repo_list, repo_read_file, repo_diff, repo_search, get_pr, load_skill]
+    maxSteps: 25
+    maxCostUsd: 0.50
+    plan: false
+  writer:
+    model: openrouter:~z-ai/glm-latest
+    tools: [load_skill]
+    maxSteps: 6
+    maxCostUsd: 0.20
+    plan: false
+  critic:
+    model: openrouter:anthropic/claude-sonnet-5.5
+    tools: []
+    maxSteps: 1
+    maxCostUsd: 0.10
+    plan: false
+  chat:
+    model: openrouter:z-ai/glm-5.3-flash
+    tools: [repo_list, repo_read_file, repo_search, get_pr, list_events, read_brief, memory_read, load_skill, send_message]
+    maxSteps: 15
+    maxCostUsd: 0.30
+    plan: false
+
+# Largest tool result (in characters) put in context; longer outputs are cut with a note on how to page.
+maxToolOutputChars: 12000
+
+# USD per million tokens. Optional with OpenRouter, which reports the real cost of each call; an entry
+# here overrides that, and is needed for direct providers. Without either, only the step budget applies.
+pricing: {}
+#  anthropic:claude-sonnet-5-5: { input: <usd>, output: <usd>, cacheRead: <usd> }
+
+# Decision models answer typed questions with a probability per option instead of generating text.
+# They're served through OpenRouter's Decisions API (e.g. cloudflare/clef, cloudflare/clef-flash,
+# typesafe/jev-1.14). Schemas (the questions) live in decisions/<name>.yaml; a project can replace
+# one in projects/<id>/decisions/<name>.yaml.
+decisions:
+  model: openrouter:baseten/mammoth-1:free
+  # An answer is used only when its probability reaches the threshold; below it the owner decides.
+  # Start strict; refit per question from the owner's labeled choices (opencm fit-thresholds, phase 3).
+  thresholds:
+    default: 0.85

@@ -1,0 +1,23 @@
+# What content, if any, a merged change deserves. State given to the model: the change brief, PR facts
+# (files, size, labels, new tools, version bump), the held queue and recent posting history.
+questions:
+  format:
+    type: choice
+    instructions: >-
+      Choose how much content this change deserves for the project's users. Judge by what users can do
+      or notice now, not by how much code changed.
+    criteria:
+      skip: Internal only (refactor, tests, CI, docs typos, dependency bumps). Users notice nothing.
+      hold: Real but small (a fix or minor improvement). Worth mentioning in the next digest, not alone.
+      post: One self-contained, user-visible change that is easy to explain in a single short post.
+      thread: >-
+        Needs explaining or is big: a new feature or tool, a breaking change with upgrade steps,
+        several related changes, or a new version release.
+  merge_with_held:
+    type: boolean
+    instructions: The change is closely related to at least one item in the held queue and they read better together.
+  link_worth_cost:
+    type: boolean
+    instructions: >-
+      Readers need a link (install, docs, release notes) to act on this content. A post with a link
+      costs about 13 times more than one without.

@@ -1,0 +1,192 @@
+import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
+import { generateText, tool, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import { z } from "zod";
+import { roleConfig, type HarnessConfig } from "./config.js";
+import { assemblePrompt, loadSections, type SectionName } from "./context.js";
+import { costUsd, resolveModel } from "./models.js";
+import { allowedTools, limitOutput, scrubSecrets } from "./policy.js";
+import { discoverSkills, skillsIndex, type Skill } from "./skills.js";
+import { Trace, type RunStatus } from "./trace.js";
+import { db as sharedDb, now } from "../store/db.js";
+
+/** A tool as the harness sees it. Tools return text (or JSON); the loop scrubs, limits and traces it. */
+export interface AgentTool<I = any> {
+  description: string;
+  inputSchema: z.ZodType<I>;
+  execute: (input: I) => Promise<unknown>;
+}
+
+export interface RunOptions {
+  role: string;
+  projectId?: string;
+  /** The user message: everything that varies per task. Untrusted repo text must already be fenced (asUntrustedData). */
+  task: string;
+  /** Tools registered for this run; the role's allowlist in config picks which ones the model gets. */
+  tools?: Record<string, AgentTool>;
+  harness: HarnessConfig;
+  /** Extra prompt sections, e.g. `environment`. */
+  sections?: Partial<Record<SectionName, string>>;
+  /** Resume this run from its last checkpoint instead of starting a new one. */
+  resumeRunId?: string;
+  /** Injected for tests and evals; otherwise resolved from the role's config. */
+  model?: LanguageModel;
+  db?: DatabaseSync;
+  skillRoots?: { core: string; project?: string };
+}
+
+export interface RunResult {
+  runId: string;
+  status: RunStatus;
+  text: string;
+  steps: number;
+  costUsd?: number;
+  harnessVersion: string;
+}
+
+const PLAN_NOTE = "\n\nBefore using any tool, write a short numbered plan. Then follow it, adjusting if you learn something new.";
+
+/**
+ * The agent loop. One generateText call is one step (the model answers or calls tools; the tools
+ * run). After every step the whole conversation is checkpointed, so a run interrupted by a crash
+ * or a shutdown resumes from the last finished step. Stops when the model answers without calling
+ * tools, or when the step or cost budget from config runs out.
+ */
+export async function runAgent(opts: RunOptions): Promise<RunResult> {
+  const store = opts.db ?? sharedDb();
+  const rc = roleConfig(opts.harness, opts.role);
+  const model = opts.model ?? resolveModel(rc.model);
+
+  const skills = discoverSkills(opts.projectId, opts.skillRoots);
+  const wantsSkills = rc.tools.includes("load_skill");
+  const prompt = assemblePrompt(
+    { ...loadSections(opts.role, opts.projectId), ...(wantsSkills ? { skills: skillsIndex(skills) } : {}), ...opts.sections },
+    rc,
+  );
+
+  let runId: string;
+  let messages: ModelMessage[];
+  let step: number;
+  let spent: number | undefined;
+
+  if (opts.resumeRunId) {
+    runId = opts.resumeRunId;
+    const run = store.prepare("SELECT harness_version, cost_usd FROM runs WHERE id = ?").get(runId) as
+      | { harness_version: string; cost_usd: number | null }
+      | undefined;
+    if (!run) throw new Error(`Run ${runId} not found; start a new run instead`);
+    if (run.harness_version !== prompt.harnessVersion) {
+      throw new Error(`Run ${runId} used harness ${run.harness_version}, current is ${prompt.harnessVersion}; prompts or config changed, start a new run`);
+    }
+    const cp = store.prepare("SELECT step, messages FROM checkpoints WHERE run_id = ? ORDER BY step DESC LIMIT 1").get(runId) as
+      | { step: number; messages: string }
+      | undefined;
+    step = cp?.step ?? 0;
+    messages = cp ? JSON.parse(cp.messages) : [{ role: "user", content: opts.task }];
+    spent = run.cost_usd ?? undefined;
+  } else {
+    runId = `${new Date().toISOString().replace(/[:.]/g, "-")}_${opts.role}_${randomUUID().slice(0, 8)}`;
+    step = 0;
+    messages = [{ role: "user", content: rc.plan ? opts.task + PLAN_NOTE : opts.task }];
+    store
+      .prepare("INSERT INTO runs (id, project, role, model, harness_version, task, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)")
+      .run(runId, opts.projectId ?? null, opts.role, rc.model, prompt.harnessVersion, opts.task, now(), now());
+  }
+
+  const trace = new Trace(runId);
+  trace.write({ type: "run_start", role: opts.role, model: rc.model, harnessVersion: prompt.harnessVersion, task: opts.task.slice(0, 500) });
+
+  const available: Record<string, AgentTool> = { ...opts.tools, ...(wantsSkills ? { load_skill: loadSkillTool(skills, (s) => logSkill(s)) } : {}) };
+  const granted = allowedTools(opts.role, rc, available);
+  let currentStep = step;
+  const logSkill = (s: Skill) =>
+    store.prepare("INSERT INTO skill_usage (run_id, skill, source, step) VALUES (?, ?, ?, ?)").run(runId, s.name, s.source, currentStep + 1);
+  const tools = wrapTools(granted, opts.harness.maxToolOutputChars, trace, () => currentStep + 1);
+
+  let status: RunStatus = "max_steps";
+  let text = "";
+  let error: string | undefined;
+
+  try {
+    while (step < rc.maxSteps) {
+      currentStep = step;
+      const result = await generateText({ model, instructions: prompt.instructions, messages, tools });
+      step++;
+      messages = [...messages, ...result.responseMessages];
+
+      const cost = costUsd(opts.harness, rc.model, result.usage, result.providerMetadata);
+      if (cost !== undefined) spent = (spent ?? 0) + cost;
+      trace.write({
+        type: "step",
+        step,
+        finishReason: result.finishReason,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        cachedTokens: result.usage.inputTokenDetails?.cacheReadTokens,
+        costUsd: cost,
+      });
+      store
+        .prepare("INSERT INTO checkpoints (run_id, step, messages, cost_usd, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(runId, step, JSON.stringify(messages), spent ?? null, now());
+      store.prepare("UPDATE runs SET steps = ?, cost_usd = ?, updated_at = ? WHERE id = ?").run(step, spent ?? null, now(), runId);
+
+      if (result.finishReason !== "tool-calls") {
+        status = "done";
+        text = result.text;
+        break;
+      }
+      if (spent !== undefined && spent > rc.maxCostUsd) {
+        status = "budget";
+        break;
+      }
+    }
+  } catch (e) {
+    status = "error";
+    error = e instanceof Error ? e.message : String(e);
+  }
+
+  store
+    .prepare("UPDATE runs SET status = ?, result = ?, error = ?, updated_at = ? WHERE id = ?")
+    .run(status, text || null, error ?? null, now(), runId);
+  trace.write({ type: "run_end", status, steps: step, costUsd: spent, error });
+  return { runId, status, text, steps: step, costUsd: spent, harnessVersion: prompt.harnessVersion };
+}
+
+/** Wraps harness tools as AI SDK tools: errors become text the model can act on; output is scrubbed and limited. */
+function wrapTools(tools: Record<string, AgentTool>, maxChars: number, trace: Trace, stepNo: () => number): ToolSet {
+  const out: ToolSet = {};
+  for (const [name, t] of Object.entries(tools)) {
+    out[name] = tool({
+      description: t.description,
+      inputSchema: t.inputSchema,
+      execute: async (input: unknown) => {
+        trace.write({ type: "tool_call", step: stepNo(), tool: name, input });
+        try {
+          const raw = await t.execute(input);
+          const textOut = typeof raw === "string" ? raw : JSON.stringify(raw);
+          const limited = limitOutput(scrubSecrets(textOut), maxChars);
+          trace.write({ type: "tool_result", step: stepNo(), tool: name, chars: textOut.length, truncated: limited.truncated });
+          return limited.text;
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          trace.write({ type: "tool_result", step: stepNo(), tool: name, chars: 0, truncated: false, error: message });
+          return `Error from ${name}: ${scrubSecrets(message)}`;
+        }
+      },
+    });
+  }
+  return out;
+}
+
+function loadSkillTool(skills: Map<string, Skill>, onLoad: (s: Skill) => void): AgentTool<{ name: string }> {
+  return {
+    description: "Loads the full instructions of a skill listed in <skills>. Call it before doing the kind of work the skill covers.",
+    inputSchema: z.object({ name: z.string().describe("Skill name exactly as listed, e.g. 'x-thread'") }),
+    execute: async ({ name }) => {
+      const skill = skills.get(name);
+      if (!skill) return `No skill named '${name}'. Available: ${[...skills.keys()].join(", ") || "none"}`;
+      onLoad(skill);
+      return skill.body;
+    },
+  };
+}
