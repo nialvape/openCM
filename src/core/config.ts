@@ -23,11 +23,17 @@ const DecisionsConfigSchema = z.object({
   thresholds: z.record(z.string(), z.number().min(0).max(1)).refine((t) => t.default !== undefined, "thresholds.default is required"),
 });
 
+const ChatConfigSchema = z.object({
+  compactAtChars: z.number().int().positive(),
+  keepRecentTurns: z.number().int().positive(),
+});
+
 export const HarnessConfigSchema = z.object({
   roles: z.record(z.string(), RoleConfigSchema),
   maxToolOutputChars: z.number().int().positive(),
   pricing: z.record(z.string(), PriceSchema),
   decisions: DecisionsConfigSchema,
+  chat: ChatConfigSchema,
 });
 
 export const ProjectConfigSchema = z.object({

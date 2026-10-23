@@ -27,6 +27,8 @@ export interface RunOptions {
   harness: HarnessConfig;
   /** Extra prompt sections, e.g. `environment`. */
   sections?: Partial<Record<SectionName, string>>;
+  /** Earlier turns of a conversation (chat sessions); the task is appended as the newest user message. */
+  history?: ModelMessage[];
   /** Resume this run from its last checkpoint instead of starting a new one. */
   resumeRunId?: string;
   /** Injected for tests and evals; otherwise resolved from the role's config. */
@@ -42,6 +44,8 @@ export interface RunResult {
   steps: number;
   costUsd?: number;
   harnessVersion: string;
+  /** The whole conversation after the run, history included: what a chat session keeps. */
+  messages: ModelMessage[];
 }
 
 const PLAN_NOTE = "\n\nBefore using any tool, write a short numbered plan. Then follow it, adjusting if you learn something new.";
@@ -87,7 +91,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
   } else {
     runId = `${new Date().toISOString().replace(/[:.]/g, "-")}_${opts.role}_${randomUUID().slice(0, 8)}`;
     step = 0;
-    messages = [{ role: "user", content: rc.plan ? opts.task + PLAN_NOTE : opts.task }];
+    messages = [...(opts.history ?? []), { role: "user", content: rc.plan ? opts.task + PLAN_NOTE : opts.task }];
     store
       .prepare("INSERT INTO runs (id, project, role, model, harness_version, task, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)")
       .run(runId, opts.projectId ?? null, opts.role, rc.model, prompt.harnessVersion, opts.task, now(), now());
@@ -149,7 +153,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
     .prepare("UPDATE runs SET status = ?, result = ?, error = ?, updated_at = ? WHERE id = ?")
     .run(status, text || null, error ?? null, now(), runId);
   trace.write({ type: "run_end", status, steps: step, costUsd: spent, error });
-  return { runId, status, text, steps: step, costUsd: spent, harnessVersion: prompt.harnessVersion };
+  return { runId, status, text, steps: step, costUsd: spent, harnessVersion: prompt.harnessVersion, messages };
 }
 
 /** Wraps harness tools as AI SDK tools: errors become text the model can act on; output is scrubbed and limited. */

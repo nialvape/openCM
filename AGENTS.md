@@ -12,7 +12,7 @@ skills/<name>/SKILL.md  generic skills (frontmatter: name, description); loaded 
 projects/_template/   committed example of a project folder
 projects/<id>/        GITIGNORED: everything particular to a tracked repo (language, voice, skills, examples)
 src/
-  cli.ts              entry point (opencm doctor | ask | resume)
+  cli.ts              entry point (opencm bot | doctor | ask | resume)
   core/
     config.ts         loads config/default.yaml + the project's `harness:` override, validated with zod
     models.ts         "<provider>:<model>" → AI SDK model (OpenRouter by default); cost reported by OpenRouter or from config pricing
@@ -21,7 +21,11 @@ src/
     policy.ts         tool allowlist per role, secret scrubbing, output limits, fencing of untrusted text
     loop.ts           the agent loop: one generateText call per step, checkpoint after every step
     decision.ts       decision model call (OpenRouter Decisions API) + confidence gate; low-confidence answers go to the owner
+    compact.ts        chat session compaction: split at a user turn, summary rides in the first kept turn
     trace.ts          JSONL trace per run in data/traces/
+  sources/github/     thin GitHub REST client (fetch), only the fields openCM reads
+  tools/repo.ts       read-only repo tools for agents (repo_list, repo_read_file, repo_search, list_prs, get_pr)
+  channels/telegram/  bot.ts: grammY long polling, owner-only; chat.ts: one owner message → one chat run
   store/db.ts         SQLite (node:sqlite) in data/opencm.sqlite
 data/                 GITIGNORED: database, traces, clones, outputs
 ```
@@ -48,3 +52,4 @@ data/                 GITIGNORED: database, traces, clones, outputs
 - `npm run typecheck` and `npm test` (vitest; uses a mock model, no API keys needed).
 - `npm run dev -- doctor <project>` validates a project's config and shows each role's harness version.
 - `npm run dev -- ask <project> writer "<task>"` runs a real model (needs the provider key in `.env`).
+- `npm run dev -- bot <project>` starts the Telegram bot (needs TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_ID).

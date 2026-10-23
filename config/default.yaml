@@ -25,9 +25,15 @@ roles:
     plan: false
   chat:
     model: openrouter:z-ai/glm-5.3-flash
-    tools: [repo_list, repo_read_file, repo_search, get_pr, list_events, read_brief, memory_read, load_skill, send_message]
+    tools: [repo_list, repo_read_file, repo_search, get_pr, list_prs, load_skill, send_message]
     maxSteps: 15
     maxCostUsd: 0.30
+    plan: false
+  compactor:
+    model: openrouter:z-ai/glm-5.3-flash
+    tools: []
+    maxSteps: 1
+    maxCostUsd: 0.05
     plan: false
 
 # Largest tool result (in characters) put in context; longer outputs are cut with a note on how to page.
@@ -48,3 +54,9 @@ decisions:
   # Start strict; refit per question from the owner's labeled choices (opencm fit-thresholds, phase 3).
   thresholds:
     default: 0.85
+
+# Telegram chat sessions. When a session's history grows past compactAtChars, the older part is
+# summarized by the compactor role and only the last keepRecentTurns of the owner's turns stay verbatim.
+chat:
+  compactAtChars: 60000
+  keepRecentTurns: 6

@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS decisions (
   created_at TEXT NOT NULL,
   decided_at TEXT
 );
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  chat_id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  messages TEXT NOT NULL,
+  summary TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_transcript (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id TEXT NOT NULL,
+  author TEXT NOT NULL,
+  text TEXT NOT NULL,
+  run_id TEXT,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS skill_usage (
   run_id TEXT NOT NULL REFERENCES runs(id),
   skill TEXT NOT NULL,

@@ -6,12 +6,14 @@ import { ConfigError, loadHarnessConfig, loadProjectConfig, roleConfig } from ".
 import { assemblePrompt, loadSections } from "./core/context.js";
 import { loadDecisionSchema, thresholdFor } from "./core/decision.js";
 import { runAgent } from "./core/loop.js";
+import { startBot } from "./channels/telegram/bot.js";
 import { modelFamily } from "./core/models.js";
 import { discoverSkills, skillsIndex } from "./core/skills.js";
 
 const USAGE = `opencm — Community Manager agent harness
 
 Usage:
+  opencm bot <project>                    Start the Telegram bot (long polling, owner only)
   opencm doctor <project>                 Validate config, list skills and the harness version of each role
   opencm ask <project> <role> "<task>"    Run one role on a free-form task (smoke test)
   opencm resume <project> <role> <runId>  Resume an interrupted run from its last checkpoint
@@ -23,6 +25,8 @@ async function main(argv: string[]): Promise<number> {
 
   const [command, ...args] = argv;
   switch (command) {
+    case "bot":
+      return bot(required(args[0], "project"));
     case "doctor":
       return doctor(required(args[0], "project"));
     case "ask":
@@ -38,6 +42,12 @@ async function main(argv: string[]): Promise<number> {
 function required(value: string | undefined, name: string): string {
   if (!value) throw new ConfigError(`Missing <${name}>.\n\n${USAGE}`);
   return value;
+}
+
+async function bot(projectId: string): Promise<number> {
+  const project = loadProjectConfig(projectId);
+  await startBot(project, loadHarnessConfig(project));
+  return 0;
 }
 
 function doctor(projectId: string): number {
