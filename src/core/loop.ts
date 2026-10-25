@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { generateText, tool, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import { APICallError, generateText, tool, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import { z } from "zod";
 import { roleConfig, type HarnessConfig, type ReasoningEffort } from "./config.js";
 import { assemblePrompt, loadSections, type SectionName } from "./context.js";
@@ -48,6 +48,8 @@ export interface RunResult {
   harnessVersion: string;
   /** The whole conversation after the run, history included: what a chat session keeps. */
   messages: ModelMessage[];
+  /** Why the run failed, when status is "error". */
+  error?: string;
 }
 
 const LAST_STEP_NOTE = "You have no tool calls left. Give your final answer now, in the requested format, with what you already know.";
@@ -122,16 +124,21 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
       // The last allowed step must produce an answer: a run that ends mid-research is wasted spend.
       const lastStep = rc.maxSteps > 1 && step === rc.maxSteps - 1 && Object.keys(tools).length > 0;
       if (lastStep) messages = [...messages, { role: "user", content: LAST_STEP_NOTE }];
-      const result = await generateText({
-        model,
-        instructions: prompt.instructions,
-        messages,
-        tools,
-        ...(lastStep ? { toolChoice: "none" as const } : {}),
-        maxOutputTokens: rc.maxOutputTokens,
-        timeout: rc.stepTimeoutSec ? { stepMs: rc.stepTimeoutSec * 1000 } : undefined,
-        reasoning: opts.reasoning ?? rc.reasoning,
-      });
+      const result = await withRetries(
+        () =>
+          generateText({
+            model,
+            instructions: prompt.instructions,
+            messages,
+            tools,
+            ...(lastStep ? { toolChoice: "none" as const } : {}),
+            maxOutputTokens: rc.maxOutputTokens,
+            timeout: rc.stepTimeoutSec ? { stepMs: rc.stepTimeoutSec * 1000 } : undefined,
+            reasoning: opts.reasoning ?? rc.reasoning,
+            maxRetries: 0,
+          }),
+        (attempt, info) => trace.write({ type: "model_error", step: step + 1, attempt, ...info }),
+      );
       step++;
       messages = [...messages, ...result.responseMessages];
 
@@ -164,14 +171,66 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
     }
   } catch (e) {
     status = "error";
-    error = e instanceof Error ? e.message : String(e);
+    error = describeModelError(e).summary;
   }
 
   store
     .prepare("UPDATE runs SET status = ?, result = ?, error = ?, updated_at = ? WHERE id = ?")
     .run(status, text || null, error ?? null, now(), runId);
   trace.write({ type: "run_end", status, steps: step, costUsd: spent, error });
-  return { runId, status, text, steps: step, costUsd: spent, harnessVersion: prompt.harnessVersion, messages };
+  return { runId, status, text, steps: step, costUsd: spent, harnessVersion: prompt.harnessVersion, messages, error };
+}
+
+/** Attempts per step for a failed model call, and the longest wait between them. */
+export const MODEL_ATTEMPTS = 3;
+const MAX_RETRY_WAIT_MS = 30_000;
+
+export interface ModelErrorInfo {
+  name: string;
+  message: string;
+  statusCode?: number;
+  retryable: boolean;
+  retryAfterMs?: number;
+  body?: string;
+  /** One line for the run's error column and the owner. */
+  summary: string;
+}
+
+/** What a failed model call says about itself: the SDK's retries used to hide the real cause. */
+export function describeModelError(e: unknown): ModelErrorInfo {
+  const err = e instanceof Error ? e : new Error(String(e));
+  const api = APICallError.isInstance(err) ? err : APICallError.isInstance(err.cause) ? err.cause : undefined;
+  const headers = api?.responseHeaders ?? {};
+  const after = headers["retry-after-ms"] ? Number(headers["retry-after-ms"]) : headers["retry-after"] ? Number(headers["retry-after"]) * 1000 : undefined;
+  // A step that hit its timeout may just have hit a slow moment of the provider; worth one more try.
+  const timedOut = err.name === "TimeoutError" || err.name === "AbortError" || /aborted|timed? ?out/i.test(err.message);
+  const body = api?.responseBody ? scrubSecrets(api.responseBody).slice(0, 500) : undefined;
+  return {
+    name: err.name,
+    message: scrubSecrets(err.message),
+    statusCode: api?.statusCode,
+    retryable: api ? api.isRetryable : timedOut,
+    retryAfterMs: after !== undefined && Number.isFinite(after) ? after : undefined,
+    body,
+    summary: scrubSecrets(`${api?.statusCode ? `HTTP ${api.statusCode}: ` : ""}${err.message}${body ? ` — ${body.slice(0, 200)}` : ""}`),
+  };
+}
+
+/**
+ * Runs one model call with its own retries, so each attempt gets the full step timeout (the SDK's
+ * retries shared it, and a slow failure left none) and every failure is traced with its cause.
+ */
+export async function withRetries<T>(call: () => Promise<T>, onError: (attempt: number, info: ModelErrorInfo) => void, wait = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (e) {
+      const info = describeModelError(e);
+      onError(attempt, info);
+      if (!info.retryable || attempt >= MODEL_ATTEMPTS) throw e;
+      await wait(Math.min(info.retryAfterMs ?? 2000 * 2 ** (attempt - 1), MAX_RETRY_WAIT_MS));
+    }
+  }
 }
 
 /** Wraps harness tools as AI SDK tools: errors become text the model can act on; output is scrubbed and limited. */

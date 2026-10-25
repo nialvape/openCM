@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { runAgent, type AgentTool } from "./loop.js";
+import { describeModelError, MODEL_ATTEMPTS, runAgent, withRetries, type AgentTool } from "./loop.js";
+import { paths } from "./paths.js";
 import { openDb } from "../store/db.js";
 import type { HarnessConfig } from "./config.js";
 
@@ -70,6 +74,40 @@ describe("runAgent", () => {
     expect(model.doGenerateCalls[0].toolChoice).toEqual({ type: "auto" });
     expect(model.doGenerateCalls[1].toolChoice).toEqual({ type: "none" });
     expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("You have no tool calls left");
+  });
+
+  it("retries a failed model call and keeps its cause in the trace", async () => {
+    const db = openDb(":memory:");
+    let calls = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        if (++calls === 1) {
+          throw new APICallError({ message: "Too Many Requests", url: "u", requestBodyValues: {}, statusCode: 429, responseHeaders: { "retry-after-ms": "0" }, responseBody: '{"error":"rate limited"}', isRetryable: true });
+        }
+        return answer("ok");
+      },
+    });
+    const result = await runAgent({ role: "tester", task: "t", tools: { lookup }, harness: harness(), model, db });
+    expect(result).toMatchObject({ status: "done", text: "ok" });
+    const trace = readFileSync(join(paths.traces, `${result.runId}.jsonl`), "utf8");
+    expect(trace).toContain('"type":"model_error"');
+    expect(trace).toContain('"statusCode":429');
+    expect(trace).toContain("rate limited");
+  });
+
+  it("doesn't retry what a retry can't fix, and says why it failed", async () => {
+    const waits: number[] = [];
+    const bad = new APICallError({ message: "Bad Request", url: "u", requestBodyValues: {}, statusCode: 400, responseBody: "invalid model", isRetryable: false });
+    let calls = 0;
+    await expect(withRetries(async () => ((calls++, Promise.reject(bad))), () => {}, async (ms) => void waits.push(ms))).rejects.toBe(bad);
+    expect(calls).toBe(1);
+    expect(describeModelError(bad).summary).toBe("HTTP 400: Bad Request — invalid model");
+
+    const slow = Object.assign(new Error("Delay was aborted"), { name: "AbortError" });
+    calls = 0;
+    await expect(withRetries(async () => ((calls++, Promise.reject(slow))), () => {}, async (ms) => void waits.push(ms))).rejects.toBe(slow);
+    expect(calls).toBe(MODEL_ATTEMPTS);
+    expect(waits).toEqual([2000, 4000]);
   });
 
   it("stops at the step budget", async () => {

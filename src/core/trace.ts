@@ -8,6 +8,7 @@ export type TraceEvent =
   | { type: "tool_call"; step: number; tool: string; input: unknown }
   | { type: "tool_result"; step: number; tool: string; chars: number; truncated: boolean; error?: string }
   | { type: "tool_blocked"; step: number; tool: string; reason: string }
+  | { type: "model_error"; step: number; attempt: number; name: string; message: string; statusCode?: number; retryable: boolean; retryAfterMs?: number; body?: string; summary: string }
   | { type: "run_end"; status: RunStatus; steps: number; costUsd?: number; error?: string };
 
 /** "length": the last call hit maxOutputTokens, so the answer is cut or missing. */

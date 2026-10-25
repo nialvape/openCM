@@ -45,7 +45,7 @@ export async function runAgentJson<T>(schema: z.ZodType<T>, opts: RunOptions, re
       runs.push(result);
       continue;
     }
-    if (result.status !== "done") throw new StructuredOutputError(`${opts.role} stopped with status '${result.status}' (run ${result.runId})`);
+    if (result.status !== "done") throw new StructuredOutputError(`${opts.role} stopped with status '${result.status}'${result.error ? `: ${result.error}` : ""} (run ${result.runId})`);
     const checked = validate(schema, result.text);
     if (checked.ok) return { value: checked.value, runs };
     if (attempt >= retries) throw new StructuredOutputError(`${opts.role} returned invalid JSON (run ${result.runId}): ${checked.error}`);

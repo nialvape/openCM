@@ -42,7 +42,7 @@ export async function buildPatchNotes(release: ChangeEvent, deps: PipelineDeps):
     db: deps.db,
     model: deps.models?.writer,
   });
-  if (result.status !== "done" || !result.text.trim()) throw new Error(`Patch notes for ${release.version} failed (${result.status}, run ${result.runId})`);
+  if (result.status !== "done" || !result.text.trim()) throw new Error(`Patch notes for ${release.version} failed (${result.error ?? result.status}; run ${result.runId})`);
   const dir = join(paths.projectData(deps.project.id), "patch-notes");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${release.version}.md`);
