@@ -1,5 +1,8 @@
-import { decideGated, loadDecisionSchema } from "../core/decision.js";
 import type { Experimental_DecisionModel } from "ai";
+import { loadSections } from "../core/context.js";
+import { decideGated, loadDecisionSchema } from "../core/decision.js";
+import { asUntrustedData } from "../core/policy.js";
+import { elideFiles, getPullRequest } from "../sources/github/changes.js";
 import { eventsWithStatus, type ChangeEvent } from "../store/events.js";
 import type { ChangeBrief } from "./brief.js";
 import type { PipelineDeps } from "./types.js";
@@ -37,6 +40,34 @@ export function applyGuards(format: Format, event: ChangeEvent, deps: PipelineDe
   return { format };
 }
 
+/** Total diff characters given to the decision model; its context is large, but past this it's noise. */
+const MAX_DIFF_CHARS = 40_000;
+
+/**
+ * What the decision model can't get from the brief: labels, the description and the diff itself, so
+ * it judges the change and not only the analyst's account of it. Without GitHub it decides on the brief.
+ */
+async function pullRequestFacts(number: number, deps: PipelineDeps): Promise<Record<string, unknown>> {
+  try {
+    const { pr, files } = await getPullRequest(deps.gh, number);
+    let budget = MAX_DIFF_CHARS;
+    const diff = elideFiles(files, deps.project.prefilter.ignorePaths).map((f) => {
+      const head = `--- ${f.status} ${f.file} (+${f.additions} −${f.deletions})${f.elided ? ` [${f.elided}]` : ""}`;
+      const patch = f.patch && budget > 0 ? f.patch.slice(0, budget) : undefined;
+      budget -= patch?.length ?? 0;
+      return patch ? `${head}\n${patch}${patch.length < f.patch!.length ? "\n[cut: diff budget used up]" : ""}` : head;
+    });
+    return {
+      labels: pr.labels.map((l) => l.name),
+      size: { files: files.length, additions: files.reduce((n, f) => n + f.additions, 0), deletions: files.reduce((n, f) => n + f.deletions, 0) },
+      description: asUntrustedData(`PR #${number} description`, pr.body ?? "(no description)"),
+      diff: asUntrustedData(`PR #${number} diff`, diff.join("\n")),
+    };
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Picks how much content a briefed change deserves. Changes with nothing user-facing are skipped
  * without a model call; the decision model answers the rest, and its unsure answers go to the owner.
@@ -46,8 +77,9 @@ export async function decideFormat(event: ChangeEvent, brief: ChangeBrief, deps:
 
   const held = eventsWithStatus(deps.db, deps.project.id, "held");
   const state = {
+    audience: loadSections("decision", deps.project.id).audience ?? "(not described: assume the project's end users)",
     change_brief: brief,
-    pull_request: { number: event.pr, title: event.title, release: event.version ?? null },
+    pull_request: { number: event.pr, title: event.title, release: event.version ?? null, ...(await pullRequestFacts(event.pr, deps)) },
     held_for_digest: held.map((e) => ({ pr: e.pr, summary: (e.brief as ChangeBrief | undefined)?.summary })),
     posts_published_today: postsToday(deps),
     max_posts_per_day: deps.project.posting.maxPostsPerDay,

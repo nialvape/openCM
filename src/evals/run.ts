@@ -8,7 +8,10 @@ import { deepMerge, HarnessConfigSchema, type HarnessConfig, type ProjectConfig 
 import { harnessVersions } from "../core/context.js";
 import { paths } from "../core/paths.js";
 import { renderDraft } from "../pipeline/draft.js";
+import type { ChangeBrief } from "../pipeline/brief.js";
+import { decideFormat } from "../pipeline/decide.js";
 import { applyFormat, advance, type Outcome } from "../pipeline/flow.js";
+import { analyzeEvent } from "../pipeline/watch.js";
 import type { PipelineDeps } from "../pipeline/types.js";
 import { getPullRequest } from "../sources/github/changes.js";
 import { githubClient, GitHubError, type GitHubClient, type PullRequest, type PullRequestFile } from "../sources/github/client.js";
@@ -47,6 +50,8 @@ export interface CaseResult {
   /** The analyst didn't run: the brief came from an earlier eval with the same analyst. */
   briefCached: boolean;
   formatCorrect?: boolean;
+  /** The decision model's top choice and its probability, also when it was too unsure to decide. */
+  lean?: { format: string; probability: number; correct?: boolean };
   checksPassed?: boolean;
   checkIssues: string[];
   criticScore?: number;
@@ -69,7 +74,9 @@ export interface EvalReport {
   /** False for a no-memory baseline run (--no-memory). */
   memory: boolean;
   cases: CaseResult[];
-  summary: { formatAccuracy?: number; unsureRate?: number; checkPassRate?: number; meanCriticScore?: number; mentionRate?: number; avoidViolations: number; failures: number; costUsd: number };
+  /** True for --decisions-only: nothing was drafted, only the format was decided. */
+  decisionsOnly?: boolean;
+  summary: { formatAccuracy?: number; unsureRate?: number; leanAccuracy?: number; checkPassRate?: number; meanCriticScore?: number; mentionRate?: number; avoidViolations: number; failures: number; costUsd: number };
 }
 
 function readCases(dir: string): EvalCase[] {
@@ -134,7 +141,13 @@ function briefCacheDir(project: ProjectConfig, harness: HarnessConfig): string {
 
 const caseKey = (c: EvalCase) => (c.fixture ? `${c.name}-${createHash("sha256").update(JSON.stringify(c.fixture)).digest("hex").slice(0, 8)}` : c.name);
 
-async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig, memory: boolean, briefs: { dir: string; fresh: boolean }): Promise<CaseResult> {
+function leanOf(probabilities: Record<string, number> | undefined, expected?: string): CaseResult["lean"] {
+  const top = Object.entries(probabilities ?? {}).sort((a, b) => b[1] - a[1])[0];
+  if (!top) return undefined;
+  return { format: top[0], probability: Math.round(top[1] * 100) / 100, correct: expected ? top[0] === expected : undefined };
+}
+
+async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig, memory: boolean, briefs: { dir: string; fresh: boolean }, decisionsOnly: boolean): Promise<CaseResult> {
   const db = openDb(":memory:");
   if (memory) copyMemory(project.id, db);
   const gh = c.fixture ? fixtureGitHub(project.repo, c.fixture) : githubClient(project.repo);
@@ -151,16 +164,44 @@ async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConf
     const cached = !briefs.fresh && existsSync(cacheFile) ? (JSON.parse(readFileSync(cacheFile, "utf8")) as { brief: unknown; version?: string }) : undefined;
     // A cached brief starts the event at the decision; patch notes for releases aren't rebuilt then.
     if (cached) updateEvent(db, `${project.id}:pr:${prNumber}`, { status: "briefed", brief: cached.brief, ...(cached.version ? { version: cached.version } : {}) });
-    let outcome = await advance(getEventByPr(db, project.id, prNumber)!, deps);
-    const briefed = getEventByPr(db, project.id, prNumber);
-    if (!cached && briefed?.brief) {
+    const saveBrief = () => {
+      const briefed = getEventByPr(db, project.id, prNumber);
+      if (cached || !briefed?.brief) return;
       mkdirSync(briefs.dir, { recursive: true });
       writeFileSync(cacheFile, JSON.stringify({ brief: briefed.brief, version: briefed.version }, null, 2));
+    };
+
+    if (decisionsOnly) {
+      // Only the free decision step runs (and the analyst, when no brief is cached yet).
+      let event = getEventByPr(db, project.id, prNumber)!;
+      if (event.status === "new") {
+        const analyzed = await analyzeEvent(event, deps);
+        saveBrief();
+        if (analyzed.status !== "briefed") return { ...base, formatSource: analyzed.status === "skipped" ? "rule" : "failed", format: analyzed.status === "skipped" ? "skip" : undefined, error: analyzed.status === "failed" ? analyzed.reason : undefined, costUsd: cost() };
+        event = getEventByPr(db, project.id, prNumber)!;
+      }
+      const d = await decideFormat(event, event.brief as ChangeBrief, deps);
+      const source: CaseResult["formatSource"] = d.format ? (d.decisionId ? "model" : "rule") : "unsure";
+      return {
+        ...base,
+        briefCached: !!cached,
+        format: d.format,
+        formatSource: source,
+        formatCorrect: expectedFormat && d.format ? d.format === expectedFormat : undefined,
+        lean: leanOf(d.probabilities, expectedFormat),
+        error: d.reason.startsWith("decision model failed") ? d.reason : undefined,
+        costUsd: cost(),
+      };
     }
+
+    let outcome = await advance(getEventByPr(db, project.id, prNumber)!, deps);
+    saveBrief();
     let formatSource: CaseResult["formatSource"] = "model";
     let format: string | undefined;
+    let lean: CaseResult["lean"];
     if (outcome.kind === "ask_format") {
       formatSource = "unsure";
+      lean = leanOf(outcome.decision.probabilities, expectedFormat);
       // Still exercise the writer: continue with the expected format, or a single post.
       outcome = await applyFormat(outcome.event, (expectedFormat as any) ?? "post", deps, outcome.decision);
     } else if (outcome.kind === "skipped" && /prefilter|label|branch|only ignored|no user-facing/.test(outcome.reason)) {
@@ -178,6 +219,7 @@ async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConf
       format,
       formatSource,
       formatCorrect: expectedFormat && formatSource !== "unsure" ? format === expectedFormat : undefined,
+      lean,
       checksPassed: drafted ? drafted.issues.length === 0 : undefined,
       checkIssues: drafted ? drafted.issues.map((i) => `${i.where}: ${i.message}`) : [],
       criticScore: drafted?.score,
@@ -202,6 +244,8 @@ export function summarize(cases: CaseResult[]): EvalReport["summary"] {
     formatAccuracy: judged.length ? mean(judged.map((c) => (c.formatCorrect ? 1 : 0))) : undefined,
     // Unsure answers go to the owner and don't count toward accuracy, so report how often that happens.
     unsureRate: cases.length ? mean(cases.map((c) => (c.formatSource === "unsure" ? 1 : 0))) : undefined,
+    // How often the model's top choice was right when it was unsure: is it close, or guessing?
+    leanAccuracy: mean(cases.flatMap((c) => (c.formatSource === "unsure" && c.lean?.correct !== undefined ? [c.lean.correct ? 1 : 0] : []))),
     checkPassRate: checked.length ? mean(checked.map((c) => (c.checksPassed ? 1 : 0))) : undefined,
     meanCriticScore: mean(cases.flatMap((c) => (c.criticScore !== undefined ? [c.criticScore] : []))),
     mentionRate: withMentions.length ? mean(withMentions.map((c) => (c.mentionMissing.length === 0 ? 1 : 0))) : undefined,
@@ -236,22 +280,28 @@ export async function runEvals(
   project: ProjectConfig,
   harness: HarnessConfig,
   onCase?: (r: CaseResult) => void,
-  opts: { memory?: boolean; freshBriefs?: boolean } = {},
+  opts: { memory?: boolean; freshBriefs?: boolean; decisionsOnly?: boolean } = {},
 ): Promise<{ report: EvalReport; previous?: EvalReport; file: string }> {
   const memory = opts.memory ?? true;
+  const decisionsOnly = opts.decisionsOnly ?? false;
   const briefs = { dir: briefCacheDir(project, harness), fresh: opts.freshBriefs ?? false };
   const cases = loadCases(project.id);
   if (cases.length === 0) throw new Error(`No eval cases. Add YAML files to projects/${project.id}/evals/cases/ (e.g. 'pr: 16').`);
   const results: CaseResult[] = [];
   for (const c of cases) {
-    const r = await runCase(c, project, harness, memory, briefs);
+    const r = await runCase(c, project, harness, memory, briefs, decisionsOnly);
     results.push(r);
     onCase?.(r);
   }
   const dir = join(paths.projectData(project.id), "evals");
   mkdirSync(dir, { recursive: true });
-  const previousFile = readdirSync(dir).filter((f) => f.endsWith(".json")).sort().pop();
-  const previous = previousFile ? (JSON.parse(readFileSync(join(dir, previousFile), "utf8")) as EvalReport) : undefined;
+  // Compare with the last report of the same kind: a decisions-only run has no drafts to compare.
+  const previous = readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .sort()
+    .reverse()
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as EvalReport)
+    .find((r) => (r.decisionsOnly ?? false) === decisionsOnly);
   const report: EvalReport = {
     project: project.id,
     at: new Date().toISOString(),
@@ -260,6 +310,7 @@ export async function runEvals(
     models: Object.fromEntries(Object.entries(harness.roles).map(([r, rc]) => [r, rc.model])),
     decisionModel: harness.decisions.model,
     memory,
+    decisionsOnly,
     cases: results,
     summary: summarize(results),
   };

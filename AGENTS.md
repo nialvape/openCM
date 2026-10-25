@@ -72,4 +72,5 @@ data/                 GITIGNORED: database, traces, clones, outputs
 - `npm run typecheck` and `npm test` (vitest; uses a mock model, no API keys needed).
 - `npm run dev -- doctor <project>` validates a project's config and shows each role's harness version.
 - `npm run dev -- ask <project> writer "<task>"` runs a real model (needs the provider key in `.env`).
+- `npm run dev -- eval <project> --decisions-only` measures only the format decision on cached briefs (free with a free decision model): use it for changes to `decisions/` or to the decision state.
 - `npm run dev -- bot <project>` starts the Telegram bot (needs TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_ID).
