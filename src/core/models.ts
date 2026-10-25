@@ -39,8 +39,10 @@ export function resolveModel(ref: string): LanguageModel {
   return make(modelId);
 }
 
-/** Decision models (typed answers with probabilities). Only OpenRouter's Decisions API for now. */
+/** Decision models (typed answers with probabilities): Vercel AI Gateway and OpenRouter's Decisions API. */
 const decisionProviders: Record<string, (modelId: string) => Experimental_DecisionModel> = {
+  // The gateway implements ai@7's decision contract natively, so it needs no adapter.
+  gateway: (id) => vercelGateway().decisionModel(id),
   openrouter: (id) => fromEvaluationModel(openrouter.evaluationModel(id)),
 };
 

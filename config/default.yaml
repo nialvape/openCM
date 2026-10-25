@@ -77,7 +77,7 @@ pricing:
 # typesafe/jev-1.14). Schemas (the questions) live in decisions/<name>.yaml; a project can replace
 # one in projects/<id>/decisions/<name>.yaml.
 decisions:
-  model: openrouter:baseten/mammoth-1:free
+  model: gateway:baseten/mammoth-1
   # An answer is used only when its probability reaches the threshold; below it the owner decides.
   # Start strict; refit per question from the owner's labeled choices (opencm fit-thresholds, phase 3).
   thresholds:
