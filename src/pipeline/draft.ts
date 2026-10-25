@@ -115,12 +115,19 @@ async function write(o: WriteOptions, deps: PipelineDeps, issues: string[]): Pro
   return { ...rest, format: o.format, ...(o.wantsLink === true && linkReply ? { linkReply } : {}) };
 }
 
+const formatSize = (format: Draft["format"]) => {
+  const [min, max] = POSTS_PER_FORMAT[format];
+  return min === max ? `exactly ${min} post${min === 1 ? "" : "s"}` : `${min} to ${max} posts`;
+};
+
 async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps): Promise<Critique> {
   const { value } = await runAgentJson(CritiqueSchema, {
     role: "critic",
     projectId: deps.project.id,
     task: [
       `Review this ${draft.format} draft against the change briefs.`,
+      // Without the shape the critic asked to split a single post in two, which the checks then reject.
+      `The format is fixed: a ${draft.format} has ${formatSize(draft.format)}. Never suggest adding or splitting posts; if something doesn't fit, say what to drop.`,
       `Draft:\n${JSON.stringify(draft, null, 2)}`,
       // The critic can't count either; without this it asked to add text to posts that were full.
       `Length of each post as X counts it (limit ${X_LIMIT}):\n${measure(draft.posts.map((p) => p.text)).map((m) => `post ${m.post}: ${m.length}/${X_LIMIT}`).join("\n")}`,
@@ -216,12 +223,17 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
   let revisions = 0;
   let review: Critique | undefined;
   const applied: string[] = [];
+  // The latest version that passed every check, with its review: a last rewrite that breaks a check
+  // (e.g. a post turned into two) must not replace it.
+  let passing: { draft: Draft; review: Critique } | undefined;
 
   while (true) {
     if (issues.length === 0) {
       review = await critique(draft, o.briefs, deps);
+      passing = { draft, review };
       if (!needsRevision(review) || revisions >= maxRevisions) break;
     } else if (revisions >= maxRevisions) {
+      if (passing) ({ draft, review } = passing), (issues = []);
       break;
     }
     const feedback = issues.length ? formatIssues(issues) : review!.fixes.length ? review!.fixes : ["The reviewer asked for a better version."];

@@ -88,7 +88,9 @@ export async function startBot(projectId: string): Promise<void> {
   const bot = new Bot(token);
   const pending = new Map<string, Pending>();
 
-  const send = (text: string, keyboard?: InlineKeyboard) => bot.api.sendMessage(ownerId, clip(text), keyboard ? { reply_markup: keyboard } : {});
+  // No link previews: a PR link's preview card was bigger than the draft it came with.
+  const send = (text: string, keyboard?: InlineKeyboard) =>
+    bot.api.sendMessage(ownerId, clip(text), { link_preview_options: { is_disabled: true }, ...(keyboard ? { reply_markup: keyboard } : {}) });
 
   async function sendDraft(draftId: string): Promise<void> {
     const d = getDraft(deps, draftId);

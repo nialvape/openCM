@@ -127,6 +127,17 @@ describe("composeDraft", () => {
     expect(JSON.stringify(writer.doGenerateCalls[0].prompt)).toContain("Each post at most 280 characters");
   });
 
+  it("keeps the last version that passed the checks when the final rewrite breaks one", async () => {
+    const good = { text: "Ya podés usar la TUP.", claims: ["16:c1"] };
+    const writer = mockModel(answer(draftJson({ posts: [good] })), answer(draftJson({ posts: [good, { text: "Y otra cosa.", claims: ["16:c1"] }] })));
+    const critic = mockModel(answer(badCritique));
+    const out = await composeDraft({ format: "post", briefs: [brief(16)] }, deps({}, { writer, critic }), 1);
+    expect(out.draft.posts).toEqual([good]);
+    expect(out.issues).toEqual([]);
+    expect(out.critique?.verdict).toBe("revise");
+    expect(JSON.stringify(critic.doGenerateCalls[0].prompt)).toContain("a post has exactly 1 post. Never suggest adding or splitting posts");
+  });
+
   it("adds a link reply only when the decision said readers need one", async () => {
     const withLink = () => mockModel(answer(draftJson({ posts: [{ text: "Ya podés usar la TUP.", claims: ["16:c1"] }], linkReply: "Repo: https://github.com/o/r" })));
     const asked = withLink();
