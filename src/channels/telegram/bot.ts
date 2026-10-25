@@ -2,7 +2,8 @@ import { Bot, InputFile, type Context, type InlineKeyboard } from "grammy";
 import { ConfigError } from "../../core/config.js";
 import { scrubSecrets } from "../../core/policy.js";
 import { pipelineDeps } from "../../pipeline/deps.js";
-import { advance, maybeDigest, type Outcome } from "../../pipeline/flow.js";
+import { advance, draftPullRequest, maybeDigest, type Outcome } from "../../pipeline/flow.js";
+import { FORMATS, type Format } from "../../pipeline/decide.js";
 import {
   answerFormat,
   approveDraft,
@@ -60,6 +61,7 @@ export const isOwner = (ctx: Pick<Context, "from" | "chat">, ownerId: number) =>
 const HELP = `I'm the community manager agent for this project. I watch the repo, and when a PR is merged I send you a draft to approve, edit or reject. You can also ask me about recent changes or to draft something.
 
 /run  check GitHub for merged PRs now
+/pr <number> [post|thread|hold|skip]  draft content about one merged PR, even an old one
 /drafts  show drafts and questions waiting for you
 /digest  draft a digest of the held changes now
 /reflect  propose lessons from your recent corrections
@@ -114,6 +116,18 @@ export async function startBot(projectId: string): Promise<void> {
       case "skipped":
         console.log(`#${o.event.pr} skipped: ${o.reason}`);
     }
+  }
+
+  /** Like deliver, but the owner asked for it, so a skip is reported instead of only logged. */
+  async function deliverRequested(o: Outcome): Promise<string> {
+    if (o.kind === "skipped") {
+      await send(`⏭ #${o.event.pr} skipped: ${o.reason}. Ask for a format (e.g. /pr ${o.event.pr} post) to draft it anyway.`);
+      return `skipped: ${o.reason}`;
+    }
+    await deliver(o);
+    if (o.kind === "drafted") return `a ${o.draft.draft.format} draft card was sent to the owner${o.draft.score !== undefined ? ` (critic ${o.draft.score}/5)` : ""}`;
+    if (o.kind === "ask_format") return "the decision model wasn't sure of the format; a card asking the owner to choose was sent";
+    return `${o.kind}: ${o.reason}`;
   }
 
   /** Publishing is plain code run on the owner's approval; failures offer a retry that skips what was posted. */
@@ -185,6 +199,18 @@ export async function startBot(projectId: string): Promise<void> {
     await ctx.reply("Checking GitHub…");
     const n = await cycle();
     if (n === 0) await ctx.reply("Nothing new to process.");
+  });
+  bot.command("pr", async (ctx) => {
+    const [num, fmt] = ctx.match.trim().split(/\s+/);
+    const number = Number(num?.replace("#", ""));
+    if (!Number.isInteger(number) || number <= 0) return void (await ctx.reply("Usage: /pr <number> [post|thread|hold|skip], e.g. /pr 17 post"));
+    if (fmt && !(FORMATS as string[]).includes(fmt)) return void (await ctx.reply(`Format must be one of: ${FORMATS.join(", ")}`));
+    await ctx.reply(`Working on #${number}…`);
+    try {
+      await deliverRequested(await draftPullRequest(number, deps, { format: fmt as Format | undefined }));
+    } catch (e) {
+      await ctx.reply(`⚠️ ${errorText(e)}`);
+    }
   });
   bot.command("digest", async (ctx) => {
     const held = eventsWithStatus(deps.db, project.id, "held");
@@ -299,6 +325,7 @@ export async function startBot(projectId: string): Promise<void> {
         harness,
         db: deps.db,
         repoTools: deps.repoTools,
+        draftPr: async (pr, format) => deliverRequested(await draftPullRequest(pr, deps, { format })),
       });
       for (const part of splitMessage(reply)) await ctx.reply(part);
     } catch (e) {
@@ -316,6 +343,7 @@ export async function startBot(projectId: string): Promise<void> {
   await bot.api.deleteWebhook();
   await bot.api.setMyCommands([
     { command: "run", description: "Check GitHub for merged PRs now" },
+    { command: "pr", description: "Draft content about one merged PR: /pr 17 [post|thread]" },
     { command: "drafts", description: "Drafts and questions waiting for you" },
     { command: "digest", description: "Draft a digest of held changes" },
     { command: "reflect", description: "Propose lessons from your corrections" },

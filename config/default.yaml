@@ -34,7 +34,7 @@ roles:
     reasoning: low
   chat:
     model: gateway:zai/glm-5.3-flash
-    tools: [repo_list, repo_read_file, repo_search, get_pr, list_prs, load_skill, send_message]
+    tools: [repo_list, repo_read_file, repo_search, get_pr, list_prs, load_skill, send_message, draft_for_pr]
     maxSteps: 15
     maxCostUsd: 0.30
     plan: false

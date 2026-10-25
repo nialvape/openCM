@@ -1,5 +1,6 @@
 import type { Experimental_DecisionModel } from "ai";
-import { eventsWithStatus, getEvent, updateEvent, type ChangeEvent } from "../store/events.js";
+import { getPullRequest } from "../sources/github/changes.js";
+import { addEvent, eventsWithStatus, getEvent, getEventByPr, updateEvent, type ChangeEvent } from "../store/events.js";
 import type { ChangeBrief } from "./brief.js";
 import { applyGuards, decideFormat, type Format, type FormatDecision } from "./decide.js";
 import { composeDraft, type ComposedDraft } from "./draft.js";
@@ -73,6 +74,27 @@ export async function advance(event: ChangeEvent, deps: PipelineDeps, decisionMo
     updateEvent(deps.db, current.id, { reason });
     return { kind: "failed", event: current, reason };
   }
+}
+
+/**
+ * The owner asked for content about one merged PR, even an old or already handled one. Its brief is
+ * reused unless `rebrief`; with a `format` the owner's choice replaces the decision model's.
+ */
+export async function draftPullRequest(number: number, deps: PipelineDeps, opts: { format?: Format; rebrief?: boolean } = {}): Promise<Outcome> {
+  const { pr } = await getPullRequest(deps.gh, number);
+  if (!pr.merged_at) throw new Error(`PR #${number} isn't merged; I only write about merged changes.`);
+  addEvent(deps.db, { project: deps.project.id, pr: number, title: pr.title, url: pr.html_url, mergedAt: pr.merged_at });
+  const existing = getEventByPr(deps.db, deps.project.id, number)!;
+  updateEvent(deps.db, existing.id, { status: existing.brief && !opts.rebrief ? "briefed" : "new" });
+  const event = getEventByPr(deps.db, deps.project.id, number)!;
+  if (!opts.format) return advance(event, deps);
+
+  if (event.status === "new") {
+    const analyzed = await analyzeEvent(event, deps);
+    if (analyzed.status === "failed") return { kind: "failed", event: getEvent(deps.db, event.id)!, reason: analyzed.reason };
+    if (analyzed.status === "skipped") return { kind: "skipped", event: getEvent(deps.db, event.id)!, reason: analyzed.reason };
+  }
+  return applyFormat(getEvent(deps.db, event.id)!, opts.format, deps, { reason: "chosen by the owner" });
 }
 
 /** Drafts a digest of held events when enough piled up, or right away with `force`. */

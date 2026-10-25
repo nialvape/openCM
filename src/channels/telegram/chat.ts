@@ -12,6 +12,11 @@ export interface ChatDeps {
   db: DatabaseSync;
   /** Tools over the tracked repo (repo_list, get_pr…); send_message is added per message. */
   repoTools: Record<string, AgentTool>;
+  /**
+   * Runs the pipeline for one merged PR and sends the owner its draft card; returns what happened.
+   * Drafts go through the writer, checks and critic, and reach X only when the owner approves the card.
+   */
+  draftPr?: (pr: number, format?: "post" | "thread") => Promise<string>;
   /** Injected for tests; otherwise each role's model from config. */
   models?: { chat?: LanguageModel; compactor?: LanguageModel };
 }
@@ -70,6 +75,18 @@ function sendMessageTool(send: Send, db: DatabaseSync, chatId: string): AgentToo
   };
 }
 
+function draftForPrTool(draftPr: NonNullable<ChatDeps["draftPr"]>): AgentTool<{ pr: number; format?: "post" | "thread" }> {
+  return {
+    description:
+      "Drafts content about one merged PR the way every draft is made (writer, checks, critic) and sends the owner a draft card with approve/edit/format buttons. Use it whenever the owner asks for a post, thread or tweet about a change. Leave format out to let the format decision choose; set it only when the owner named one.",
+    inputSchema: z.object({
+      pr: z.number().int().positive().describe("The merged PR's number; find it with list_prs if the owner didn't say"),
+      format: z.enum(["post", "thread"]).optional().describe("Only when the owner asked for one"),
+    }),
+    execute: async ({ pr, format }) => draftPr(pr, format),
+  };
+}
+
 /**
  * One owner message → one chat run. The session (what the model sees) and the transcript (what
  * was said in Telegram) are stored apart; the session may be compacted, the transcript never is.
@@ -89,7 +106,7 @@ export async function handleOwnerMessage(chatId: string, text: string, send: Sen
     projectId: deps.project.id,
     task: latest.content as string,
     history: compacted.messages.slice(0, -1),
-    tools: { ...deps.repoTools, send_message: sendMessageTool(send, db, chatId) },
+    tools: { ...deps.repoTools, send_message: sendMessageTool(send, db, chatId), ...(deps.draftPr ? { draft_for_pr: draftForPrTool(deps.draftPr) } : {}) },
     harness: deps.harness,
     db,
     model: deps.models?.chat,

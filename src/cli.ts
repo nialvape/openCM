@@ -11,11 +11,9 @@ import { modelFamily } from "./core/models.js";
 import { discoverSkills, skillsIndex } from "./core/skills.js";
 import { pipelineDeps } from "./pipeline/deps.js";
 import { pendingEvents, poll } from "./pipeline/watch.js";
-import { advance, maybeDigest, type Outcome } from "./pipeline/flow.js";
+import { advance, draftPullRequest, maybeDigest, type Outcome } from "./pipeline/flow.js";
 import { renderDraft } from "./pipeline/draft.js";
 import { runEvals, withOverrides, type CaseResult } from "./evals/run.js";
-import { getPullRequest } from "./sources/github/changes.js";
-import { addEvent, getEventByPr, updateEvent } from "./store/events.js";
 
 const USAGE = `opencm — Community Manager agent harness
 
@@ -159,14 +157,8 @@ async function evals(projectId: string, args: string[]): Promise<number> {
 
 async function processPr(projectId: string, number: number): Promise<number> {
   if (!Number.isInteger(number) || number <= 0) throw new ConfigError("<number> must be a PR number, e.g. 16");
-  const deps = pipelineDeps(projectId);
-  const { pr } = await getPullRequest(deps.gh, number);
-  if (!pr.merged_at) throw new ConfigError(`PR #${number} is not merged`);
-  addEvent(deps.db, { project: projectId, pr: number, title: pr.title, url: pr.html_url, mergedAt: pr.merged_at });
-  const event = getEventByPr(deps.db, projectId, number)!;
-  // Re-running a PR starts over from the brief.
-  if (event.status !== "new") updateEvent(deps.db, event.id, { status: "new" });
-  const outcome = await advance(getEventByPr(deps.db, projectId, number)!, deps);
+  // From the CLI a PR is re-briefed: it's how you check a changed analyst on a real PR.
+  const outcome = await draftPullRequest(number, pipelineDeps(projectId), { rebrief: true });
   report(outcome);
   return outcome.kind === "failed" ? 1 : 0;
 }

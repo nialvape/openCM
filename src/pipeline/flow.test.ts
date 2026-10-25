@@ -10,7 +10,7 @@ import { repoTools } from "../tools/repo.js";
 import type { ChangeBrief } from "./brief.js";
 import { composeDraft, needsRevision, weightedScore, type Draft } from "./draft.js";
 import { bumpLevel, ownerPrecedents } from "./decide.js";
-import { advance, maybeDigest } from "./flow.js";
+import { advance, draftPullRequest, maybeDigest } from "./flow.js";
 import type { PipelineDeps } from "./types.js";
 
 const project = testProject({ bannedTerms: ["revolucionario"], posting: { maxPostsPerDay: 1, digestMinItems: 2 } });
@@ -219,6 +219,24 @@ describe("advance", () => {
       { pr: "pr#2", change: "cambio pr#2", model_chose: "post", owner_chose: "post", outcome: "accepted" },
       { pr: "pr#1", change: "cambio pr#1", model_chose: "thread", owner_chose: "post", outcome: "changed" },
     ]);
+  });
+
+  it("drafts an already handled PR on request, reusing its brief and the owner's format", async () => {
+    const analyst = mockModel(answer("should not run"));
+    const writer = mockModel(answer(draftJson({ format: "thread", posts: [{ text: "1/ Ya podés usar 26.", claims: ["26:c1"] }, { text: "2/ Probalo.", claims: ["26:c1"] }] })));
+    const d = deps(prRoutes(pr(26), files), { analyst, writer, critic: mockModel(answer(okCritique)) });
+    const e = seeded(d, 26, brief(26));
+    updateEvent(d.db, e.id, { status: "skipped" });
+
+    const out = await draftPullRequest(26, d, { format: "thread" });
+    expect(out.kind).toBe("drafted");
+    expect(getEventByPr(d.db, "demo", 26)).toMatchObject({ status: "drafted", format: "thread" });
+    expect(analyst.doGenerateCalls).toHaveLength(0);
+  });
+
+  it("refuses to draft a PR that isn't merged", async () => {
+    const d = deps(prRoutes({ ...pr(27), merged_at: null } as any, files));
+    await expect(draftPullRequest(27, d)).rejects.toThrow(/isn't merged/);
   });
 
   it("asks the owner when the decision model fails, instead of stopping", async () => {
