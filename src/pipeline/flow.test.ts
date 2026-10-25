@@ -10,7 +10,7 @@ import { repoTools } from "../tools/repo.js";
 import type { ChangeBrief } from "./brief.js";
 import { composeDraft, needsRevision, weightedScore, type Draft } from "./draft.js";
 import { bumpLevel, ownerPrecedents } from "./decide.js";
-import { advance, draftPullRequest, maybeDigest } from "./flow.js";
+import { advance, draftPullRequest, draftPullRequests, maybeDigest } from "./flow.js";
 import type { PipelineDeps } from "./types.js";
 
 const project = testProject({ bannedTerms: ["revolucionario"], posting: { maxPostsPerDay: 1, digestMinItems: 2 } });
@@ -259,6 +259,24 @@ describe("advance", () => {
     const out = await draftPullRequest(26, d, { format: "thread" });
     expect(out.kind).toBe("drafted");
     expect(getEventByPr(d.db, "demo", 26)).toMatchObject({ status: "drafted", format: "thread" });
+    expect(analyst.doGenerateCalls).toHaveLength(0);
+  });
+
+  it("drafts one post about several PRs when the owner asks for them together", async () => {
+    const analyst = mockModel(answer("should not run"));
+    const writer = mockModel(answer(draftJson({ posts: [{ text: "Ya podés usar 28 y 29.", claims: ["28:c1", "29:c1"] }] })));
+    const d = deps({ ...prRoutes(pr(28), files), ...prRoutes(pr(29), files) }, { analyst, writer, critic: mockModel(answer(okCritique)) });
+    seeded(d, 28, brief(28));
+    seeded(d, 29, brief(29));
+
+    const out = await draftPullRequests([28, 29], d);
+    if (out.kind !== "drafted") throw new Error(`expected a draft, got ${out.kind}`);
+    expect(out.draft.draft.format).toBe("post");
+    expect(out.events.map((e) => e.pr)).toEqual([28, 29]);
+    expect(getEventByPr(d.db, "demo", 29)).toMatchObject({ status: "drafted", draftId: out.draft.id });
+    const task = JSON.stringify(writer.doGenerateCalls[0].prompt);
+    expect(task).toContain("feature 28");
+    expect(task).toContain("feature 29");
     expect(analyst.doGenerateCalls).toHaveLength(0);
   });
 

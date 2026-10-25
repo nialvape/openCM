@@ -120,12 +120,12 @@ describe("handleOwnerMessage", () => {
   });
 
   it("drafts through the pipeline when the owner asks for a post", async () => {
-    const chat = new MockLanguageModelV4({ doGenerate: [call("draft_for_pr", { pr: 17 }), answer("Te mandé el draft del #17.")] });
+    const chat = new MockLanguageModelV4({ doGenerate: [call("draft_for_pr", { prs: [17] }), answer("Te mandé el draft del #17.")] });
     const asked: unknown[] = [];
-    const d = { ...deps(harness(), chat), draftPr: async (pr: number, format?: string) => (asked.push([pr, format]), "a post draft card was sent to the owner") };
+    const d = { ...deps(harness(), chat), draftPr: async (prs: number[], format?: string) => (asked.push([prs, format]), "a post draft card was sent to the owner") };
     d.harness.roles.chat = role(["get_pr", "send_message", "draft_for_pr"]);
     expect(await handleOwnerMessage("42", "armá un post del 17", async () => {}, d)).toBe("Te mandé el draft del #17.");
-    expect(asked).toEqual([[17, undefined]]);
+    expect(asked).toEqual([[[17], undefined]]);
   });
 
   it("forgets the conversation after /new", async () => {

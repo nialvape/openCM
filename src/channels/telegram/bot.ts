@@ -2,7 +2,7 @@ import { Bot, InputFile, type Context, type InlineKeyboard } from "grammy";
 import { ConfigError } from "../../core/config.js";
 import { scrubSecrets } from "../../core/policy.js";
 import { pipelineDeps } from "../../pipeline/deps.js";
-import { advance, draftPullRequest, maybeDigest, type Outcome } from "../../pipeline/flow.js";
+import { advance, draftPullRequest, draftPullRequests, maybeDigest, type Outcome } from "../../pipeline/flow.js";
 import { FORMATS, type Format } from "../../pipeline/decide.js";
 import {
   answerFormat,
@@ -62,6 +62,7 @@ const HELP = `I'm the community manager agent for this project. I watch the repo
 
 /run  check GitHub for merged PRs now
 /pr <number> [post|thread|hold|skip]  draft content about one merged PR, even an old one
+/pr <number> <number> [post|thread]  one draft about several PRs, e.g. a change and its follow-up
 /drafts  show drafts and questions waiting for you
 /digest  draft a digest of the held changes now
 /reflect  propose lessons from your recent corrections
@@ -201,13 +202,16 @@ export async function startBot(projectId: string): Promise<void> {
     if (n === 0) await ctx.reply("Nothing new to process.");
   });
   bot.command("pr", async (ctx) => {
-    const [num, fmt] = ctx.match.trim().split(/\s+/);
-    const number = Number(num?.replace("#", ""));
-    if (!Number.isInteger(number) || number <= 0) return void (await ctx.reply("Usage: /pr <number> [post|thread|hold|skip], e.g. /pr 17 post"));
-    if (fmt && !(FORMATS as string[]).includes(fmt)) return void (await ctx.reply(`Format must be one of: ${FORMATS.join(", ")}`));
-    await ctx.reply(`Working on #${number}…`);
+    const words = ctx.match.trim().split(/[\s,]+/).filter(Boolean);
+    const fmt = words.find((w) => (FORMATS as string[]).includes(w)) as Format | undefined;
+    const numbers = words.filter((w) => w !== fmt).map((w) => Number(w.replace("#", "")));
+    const usage = "Usage: /pr <number> [more numbers] [post|thread|hold|skip], e.g. /pr 17 post, or /pr 17 21 for one post about both";
+    if (!numbers.length || numbers.some((n) => !Number.isInteger(n) || n <= 0)) return void (await ctx.reply(usage));
+    if (numbers.length > 1 && fmt && fmt !== "post" && fmt !== "thread") return void (await ctx.reply("Several PRs together can be a post or a thread."));
+    await ctx.reply(`Working on ${numbers.map((n) => `#${n}`).join(" + ")}…`);
     try {
-      await deliverRequested(await draftPullRequest(number, deps, { format: fmt as Format | undefined }));
+      const outcome = numbers.length > 1 ? await draftPullRequests(numbers, deps, { format: fmt as "post" | "thread" | undefined }) : await draftPullRequest(numbers[0], deps, { format: fmt });
+      await deliverRequested(outcome);
     } catch (e) {
       await ctx.reply(`⚠️ ${errorText(e)}`);
     }
@@ -325,7 +329,7 @@ export async function startBot(projectId: string): Promise<void> {
         harness,
         db: deps.db,
         repoTools: deps.repoTools,
-        draftPr: async (pr, format) => deliverRequested(await draftPullRequest(pr, deps, { format })),
+        draftPr: async (prs, format) => deliverRequested(await draftPullRequests(prs, deps, { format })),
       });
       for (const part of splitMessage(reply)) await ctx.reply(part);
     } catch (e) {
@@ -343,7 +347,7 @@ export async function startBot(projectId: string): Promise<void> {
   await bot.api.deleteWebhook();
   await bot.api.setMyCommands([
     { command: "run", description: "Check GitHub for merged PRs now" },
-    { command: "pr", description: "Draft content about one merged PR: /pr 17 [post|thread]" },
+    { command: "pr", description: "Draft about merged PRs: /pr 17 [post|thread], /pr 17 21" },
     { command: "drafts", description: "Drafts and questions waiting for you" },
     { command: "digest", description: "Draft a digest of held changes" },
     { command: "reflect", description: "Propose lessons from your corrections" },

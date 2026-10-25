@@ -81,20 +81,50 @@ export async function advance(event: ChangeEvent, deps: PipelineDeps, decisionMo
  * reused unless `rebrief`; with a `format` the owner's choice replaces the decision model's.
  */
 export async function draftPullRequest(number: number, deps: PipelineDeps, opts: { format?: Format; rebrief?: boolean } = {}): Promise<Outcome> {
+  const event = await reopenEvent(number, deps, opts.rebrief ?? false);
+  if (!opts.format) return advance(event, deps);
+  const briefed = await ensureBrief(event, deps);
+  if (briefed.kind !== "ok") return briefed;
+  return applyFormat(briefed.event, opts.format, deps, { reason: "chosen by the owner" });
+}
+
+/**
+ * The owner asked for one piece of content about several merged PRs, e.g. a fix that continues an
+ * earlier change. One draft covers them all, like a digest; the format defaults to a single post.
+ */
+export async function draftPullRequests(numbers: number[], deps: PipelineDeps, opts: { format?: "post" | "thread" } = {}): Promise<Outcome> {
+  if (numbers.length === 1) return draftPullRequest(numbers[0], deps, opts);
+  const events: ChangeEvent[] = [];
+  for (const n of numbers) {
+    const briefed = await ensureBrief(await reopenEvent(n, deps, false), deps);
+    // A PR with nothing to say (e.g. only a version bump) just drops out of the combined draft.
+    if (briefed.kind === "failed") return briefed;
+    if (briefed.kind === "ok") events.push(briefed.event);
+  }
+  if (events.length === 0) throw new Error(`None of ${numbers.map((n) => `#${n}`).join(", ")} has anything to post about.`);
+  const format = opts.format ?? "post";
+  const draft = await composeDraft({ format, briefs: events.map(briefOf) }, deps);
+  for (const e of events) updateEvent(deps.db, e.id, { status: "drafted", format, draftId: draft.id, reason: "combined by the owner" });
+  return { kind: "drafted", events: events.map((e) => getEvent(deps.db, e.id)!), draft };
+}
+
+/** Records a merged PR as an event (again, if it was handled), keeping its brief unless `rebrief`. */
+async function reopenEvent(number: number, deps: PipelineDeps, rebrief: boolean): Promise<ChangeEvent> {
   const { pr } = await getPullRequest(deps.gh, number);
   if (!pr.merged_at) throw new Error(`PR #${number} isn't merged; I only write about merged changes.`);
   addEvent(deps.db, { project: deps.project.id, pr: number, title: pr.title, url: pr.html_url, mergedAt: pr.merged_at });
   const existing = getEventByPr(deps.db, deps.project.id, number)!;
-  updateEvent(deps.db, existing.id, { status: existing.brief && !opts.rebrief ? "briefed" : "new" });
-  const event = getEventByPr(deps.db, deps.project.id, number)!;
-  if (!opts.format) return advance(event, deps);
+  updateEvent(deps.db, existing.id, { status: existing.brief && !rebrief ? "briefed" : "new" });
+  return getEventByPr(deps.db, deps.project.id, number)!;
+}
 
-  if (event.status === "new") {
-    const analyzed = await analyzeEvent(event, deps);
-    if (analyzed.status === "failed") return { kind: "failed", event: getEvent(deps.db, event.id)!, reason: analyzed.reason };
-    if (analyzed.status === "skipped") return { kind: "skipped", event: getEvent(deps.db, event.id)!, reason: analyzed.reason };
-  }
-  return applyFormat(getEvent(deps.db, event.id)!, opts.format, deps, { reason: "chosen by the owner" });
+async function ensureBrief(event: ChangeEvent, deps: PipelineDeps): Promise<{ kind: "ok"; event: ChangeEvent } | Extract<Outcome, { kind: "failed" | "skipped" }>> {
+  if (event.status !== "new") return { kind: "ok", event };
+  const analyzed = await analyzeEvent(event, deps);
+  const current = getEvent(deps.db, event.id)!;
+  if (analyzed.status === "failed") return { kind: "failed", event: current, reason: analyzed.reason };
+  if (analyzed.status === "skipped") return { kind: "skipped", event: current, reason: analyzed.reason };
+  return { kind: "ok", event: current };
 }
 
 /** Drafts a digest of held events when enough piled up, or right away with `force`. */

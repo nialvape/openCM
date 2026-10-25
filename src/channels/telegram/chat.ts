@@ -17,7 +17,7 @@ export interface ChatDeps {
    * Runs the pipeline for one merged PR and sends the owner its draft card; returns what happened.
    * Drafts go through the writer, checks and critic, and reach X only when the owner approves the card.
    */
-  draftPr?: (pr: number, format?: "post" | "thread") => Promise<string>;
+  draftPr?: (prs: number[], format?: "post" | "thread") => Promise<string>;
   /** Injected for tests; otherwise each role's model from config. */
   models?: { chat?: LanguageModel; compactor?: LanguageModel };
 }
@@ -76,15 +76,15 @@ function sendMessageTool(send: Send, db: DatabaseSync, chatId: string): AgentToo
   };
 }
 
-function draftForPrTool(draftPr: NonNullable<ChatDeps["draftPr"]>): AgentTool<{ pr: number; format?: "post" | "thread" }> {
+function draftForPrTool(draftPr: NonNullable<ChatDeps["draftPr"]>): AgentTool<{ prs: number[]; format?: "post" | "thread" }> {
   return {
     description:
-      "Drafts content about one merged PR the way every draft is made (writer, checks, critic) and sends the owner a draft card with approve/edit/format buttons. Use it whenever the owner asks for a post, thread or tweet about a change. Leave format out to let the format decision choose; set it only when the owner named one.",
+      "Drafts one piece of content about one or more merged PRs the way every draft is made (writer, checks, critic) and sends the owner a draft card with approve/edit/format buttons. Use it whenever the owner asks for a post, thread or tweet about a change. Several PRs (e.g. a change and its follow-up) give one draft covering them all. Leave format out to let the format decision choose; set it only when the owner named one.",
     inputSchema: z.object({
-      pr: z.number().int().positive().describe("The merged PR's number; find it with list_prs if the owner didn't say"),
+      prs: z.array(z.number().int().positive()).min(1).describe("The merged PRs' numbers, usually one; find them with list_prs if the owner didn't say"),
       format: z.enum(["post", "thread"]).optional().describe("Only when the owner asked for one"),
     }),
-    execute: async ({ pr, format }) => draftPr(pr, format),
+    execute: async ({ prs, format }) => draftPr(prs, format),
   };
 }
 
