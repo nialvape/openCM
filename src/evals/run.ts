@@ -76,6 +76,8 @@ export interface EvalReport {
   cases: CaseResult[];
   /** True for --decisions-only: nothing was drafted, only the format was decided. */
   decisionsOnly?: boolean;
+  /** True for --with-history: the other cases' labels were given as the owner's precedents. */
+  withHistory?: boolean;
   summary: { formatAccuracy?: number; unsureRate?: number; leanAccuracy?: number; checkPassRate?: number; meanCriticScore?: number; mentionRate?: number; avoidViolations: number; failures: number; costUsd: number };
 }
 
@@ -147,9 +149,40 @@ function leanOf(probabilities: Record<string, number> | undefined, expected?: st
   return { format: top[0], probability: Math.round(top[1] * 100) / 100, correct: expected ? top[0] === expected : undefined };
 }
 
-async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig, memory: boolean, briefs: { dir: string; fresh: boolean }, decisionsOnly: boolean): Promise<CaseResult> {
+interface Seed {
+  pr: number;
+  summary: string;
+  format: string;
+}
+
+/**
+ * The other cases' labels as the owner's past choices (leave-one-out): it measures what precedents
+ * are worth without showing the model the answer to the case it's deciding. Needs cached briefs.
+ */
+function precedentSeeds(cases: EvalCase[], project: ProjectConfig, dir: string): Seed[] {
+  return cases.flatMap((c) => {
+    const pr = c.fixture?.pr.number ?? c.pr!;
+    const format = c.expect.format ?? (c.fixture ? undefined : ownerLabel(project.id, pr));
+    const file = join(dir, `${caseKey(c)}.json`);
+    if (!format || !existsSync(file)) return [];
+    const brief = JSON.parse(readFileSync(file, "utf8")).brief as { summary: string };
+    return [{ pr, summary: brief.summary, format }];
+  });
+}
+
+function seedPrecedents(db: ReturnType<typeof openDb>, projectId: string, seeds: Seed[], exceptPr: number): void {
+  const at = "2000-01-01T00:00:00.000Z";
+  for (const s of seeds.filter((s) => s.pr !== exceptPr)) {
+    db.prepare("INSERT INTO decisions (id, project, schema, schema_version, model, subject, state, answers, needs_owner, created_at, owner_answers, decided_at) VALUES (?, ?, 'content-format', 'eval', 'eval', ?, ?, '{}', '[]', ?, ?, ?)").run(
+      `seed-${s.pr}`, projectId, `pr#${s.pr}`, JSON.stringify({ change_brief: { summary: s.summary } }), at, JSON.stringify({ format: s.format }), at,
+    );
+  }
+}
+
+async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig, memory: boolean, briefs: { dir: string; fresh: boolean }, decisionsOnly: boolean, seeds: Seed[]): Promise<CaseResult> {
   const db = openDb(":memory:");
   if (memory) copyMemory(project.id, db);
+  seedPrecedents(db, project.id, seeds, c.fixture?.pr.number ?? c.pr!);
   const gh = c.fixture ? fixtureGitHub(project.repo, c.fixture) : githubClient(project.repo);
   const deps: PipelineDeps = { project, harness, db, gh, repoTools: repoTools(gh, project.prefilter.ignorePaths) };
   const prNumber = c.fixture?.pr.number ?? c.pr!;
@@ -280,16 +313,18 @@ export async function runEvals(
   project: ProjectConfig,
   harness: HarnessConfig,
   onCase?: (r: CaseResult) => void,
-  opts: { memory?: boolean; freshBriefs?: boolean; decisionsOnly?: boolean } = {},
+  opts: { memory?: boolean; freshBriefs?: boolean; decisionsOnly?: boolean; withHistory?: boolean } = {},
 ): Promise<{ report: EvalReport; previous?: EvalReport; file: string }> {
   const memory = opts.memory ?? true;
   const decisionsOnly = opts.decisionsOnly ?? false;
   const briefs = { dir: briefCacheDir(project, harness), fresh: opts.freshBriefs ?? false };
   const cases = loadCases(project.id);
   if (cases.length === 0) throw new Error(`No eval cases. Add YAML files to projects/${project.id}/evals/cases/ (e.g. 'pr: 16').`);
+  const withHistory = opts.withHistory ?? false;
+  const seeds = withHistory ? precedentSeeds(cases, project, briefs.dir) : [];
   const results: CaseResult[] = [];
   for (const c of cases) {
-    const r = await runCase(c, project, harness, memory, briefs, decisionsOnly);
+    const r = await runCase(c, project, harness, memory, briefs, decisionsOnly, seeds);
     results.push(r);
     onCase?.(r);
   }
@@ -301,7 +336,7 @@ export async function runEvals(
     .sort()
     .reverse()
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as EvalReport)
-    .find((r) => (r.decisionsOnly ?? false) === decisionsOnly);
+    .find((r) => (r.decisionsOnly ?? false) === decisionsOnly && (r.withHistory ?? false) === withHistory);
   const report: EvalReport = {
     project: project.id,
     at: new Date().toISOString(),
@@ -311,6 +346,7 @@ export async function runEvals(
     decisionModel: harness.decisions.model,
     memory,
     decisionsOnly,
+    withHistory,
     cases: results,
     summary: summarize(results),
   };

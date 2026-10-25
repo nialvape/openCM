@@ -30,6 +30,8 @@ const PriceSchema = z.object({
 const DecisionsConfigSchema = z.object({
   model: z.string().regex(/^[a-z0-9-]+:.+$/, "model must be '<provider>:<model>'"),
   thresholds: z.record(z.string(), z.number().min(0).max(1)).refine((t) => t.default !== undefined, "thresholds.default is required"),
+  /** How many of the owner's latest format choices the decision model sees as precedent. */
+  historySize: z.number().int().min(0).default(10),
 });
 
 const ChatConfigSchema = z.object({

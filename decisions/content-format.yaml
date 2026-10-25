@@ -1,6 +1,6 @@
 # What content, if any, a merged change deserves. State given to the model: the project's audience,
 # the change brief, PR facts (labels, size, description and diff, both fenced), the held queue and
-# today's posting count.
+# today's posting count, the release bump level and the owner's latest choices as precedents.
 questions:
   format:
     type: choice
@@ -13,7 +13,12 @@ questions:
       that support a headline change are part of it, not more headlines, so count the brief's items
       by what they mean to the audience, not one by one. Third, pick the format from that count.
       Judge by the diff and the brief together; where they disagree, trust the diff. A version number
-      alone doesn't call for a thread: the release notes are published separately.
+      alone doesn't call for a thread: the release notes are published separately. When the PR is a
+      release, `release.bump` is the maintainer's own estimate of its size: a major or minor bump
+      (in a 0.x project, a minor bump is the big one) suggests a headline change, a patch bump suggests
+      fixes. Weigh it as a hint, not a rule. `owner_precedents` are the owner's latest choices for
+      other changes, with what the model had chosen: where a similar change got a different format
+      than the model's, follow the owner's taste.
     criteria:
       skip: >-
         The audience notices nothing: internal work, tests, CI, docs typos, dependency bumps, or

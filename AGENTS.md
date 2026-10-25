@@ -20,7 +20,7 @@ src/
     skills.ts         discovers core + project skills (project wins on name clash), renders the index
     policy.ts         tool allowlist per role, secret scrubbing, output limits, fencing of untrusted text
     loop.ts           the agent loop: one generateText call per step, checkpoint after every step
-    decision.ts       decision model call (OpenRouter Decisions API) + confidence gate; low-confidence answers go to the owner
+    decision.ts       decision model call (AI Gateway or OpenRouter) + confidence gate; low-confidence answers go to the owner
     compact.ts        chat session compaction: split at a user turn, summary rides in the first kept turn
     trace.ts          JSONL trace per run in data/traces/
     structured.ts     runAgentJson: final answer must be JSON matching a zod schema, one corrective retry
@@ -72,5 +72,5 @@ data/                 GITIGNORED: database, traces, clones, outputs
 - `npm run typecheck` and `npm test` (vitest; uses a mock model, no API keys needed).
 - `npm run dev -- doctor <project>` validates a project's config and shows each role's harness version.
 - `npm run dev -- ask <project> writer "<task>"` runs a real model (needs the provider key in `.env`).
-- `npm run dev -- eval <project> --decisions-only` measures only the format decision on cached briefs (free with a free decision model): use it for changes to `decisions/` or to the decision state.
+- `npm run dev -- eval <project> --decisions-only [--with-history]` measures only the format decision on cached briefs (free with a free decision model): use it for changes to `decisions/` or to the decision state. `--with-history` gives each case the other cases' labels as the owner's precedents.
 - `npm run dev -- bot <project>` starts the Telegram bot (needs TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_ID).

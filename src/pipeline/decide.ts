@@ -3,6 +3,7 @@ import { loadSections } from "../core/context.js";
 import { decideGated, loadDecisionSchema } from "../core/decision.js";
 import { asUntrustedData } from "../core/policy.js";
 import { elideFiles, getPullRequest } from "../sources/github/changes.js";
+import type { PullRequestFile } from "../sources/github/client.js";
 import { eventsWithStatus, type ChangeEvent } from "../store/events.js";
 import type { ChangeBrief } from "./brief.js";
 import type { PipelineDeps } from "./types.js";
@@ -40,16 +41,82 @@ export function applyGuards(format: Format, event: ChangeEvent, deps: PipelineDe
   return { format };
 }
 
+export type BumpLevel = "major" | "minor" | "patch" | "other";
+
+/** Which semver part changed: the maintainer's own estimate of how big a release is. */
+export function bumpLevel(from: string, to: string): BumpLevel {
+  const parts = (v: string) => /^v?(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1).map(Number);
+  const [a, b] = [parts(from), parts(to)];
+  if (!a || !b) return "other";
+  if (a[0] !== b[0]) return "major";
+  if (a[1] !== b[1]) return "minor";
+  return a[2] !== b[2] ? "patch" : "other";
+}
+
+/** The version a release PR replaced, from the removed line of its version file. */
+function previousVersion(files: PullRequestFile[], deps: PipelineDeps): string | undefined {
+  for (const vf of deps.project.versionFiles) {
+    const pattern = new RegExp(vf.pattern);
+    const removed = files
+      .find((f) => f.filename === vf.path)
+      ?.patch?.split("\n")
+      .filter((l) => l.startsWith("-"))
+      .map((l) => pattern.exec(l.slice(1))?.[1])
+      .find(Boolean);
+    if (removed) return removed;
+  }
+  return undefined;
+}
+
+export interface Precedent {
+  pr: string | null;
+  change?: string;
+  bump?: BumpLevel;
+  model_chose?: string;
+  owner_chose: string;
+  outcome: "accepted" | "changed" | "owner only";
+}
+
+/**
+ * The owner's latest format choices, with what each change was and what the model had said: the
+ * model learns the owner's taste from them. The PR being decided is left out.
+ */
+export function ownerPrecedents(deps: PipelineDeps, excludeSubject: string): Precedent[] {
+  if (deps.harness.decisions.historySize === 0) return [];
+  const rows = deps.db
+    .prepare(
+      "SELECT subject, state, answers, owner_answers FROM decisions WHERE project = ? AND schema = 'content-format' AND owner_answers IS NOT NULL AND (subject IS NULL OR subject != ?) ORDER BY decided_at DESC LIMIT ?",
+    )
+    .all(deps.project.id, excludeSubject, deps.harness.decisions.historySize) as { subject: string | null; state: string; answers: string; owner_answers: string }[];
+  return rows.flatMap((r) => {
+    const owner = JSON.parse(r.owner_answers).format as string | undefined;
+    if (!owner) return [];
+    const state = JSON.parse(r.state);
+    const model = JSON.parse(r.answers).format?.value as string | undefined;
+    const bump = state.pull_request?.release?.bump;
+    // Absent fields are left out, not undefined: the state must be valid JSON.
+    return [{
+      pr: r.subject,
+      ...(state.change_brief?.summary ? { change: state.change_brief.summary } : {}),
+      ...(bump ? { bump } : {}),
+      ...(model ? { model_chose: model } : {}),
+      owner_chose: owner,
+      outcome: !model ? "owner only" : model === owner ? "accepted" : "changed",
+    } satisfies Precedent];
+  });
+}
+
 /** Total diff characters given to the decision model; its context is large, but past this it's noise. */
 const MAX_DIFF_CHARS = 40_000;
 
 /**
- * What the decision model can't get from the brief: labels, the description and the diff itself, so
- * it judges the change and not only the analyst's account of it. Without GitHub it decides on the brief.
+ * What the decision model can't get from the brief: labels, the description, the diff itself and how
+ * big a release the maintainer called it. Without GitHub it decides on the brief.
  */
-async function pullRequestFacts(number: number, deps: PipelineDeps): Promise<Record<string, unknown>> {
+async function pullRequestFacts(number: number, version: string | undefined, deps: PipelineDeps): Promise<Record<string, unknown>> {
   try {
     const { pr, files } = await getPullRequest(deps.gh, number);
+    const previous = version ? previousVersion(files, deps) : undefined;
     let budget = MAX_DIFF_CHARS;
     const diff = elideFiles(files, deps.project.prefilter.ignorePaths).map((f) => {
       const head = `--- ${f.status} ${f.file} (+${f.additions} −${f.deletions})${f.elided ? ` [${f.elided}]` : ""}`;
@@ -58,6 +125,7 @@ async function pullRequestFacts(number: number, deps: PipelineDeps): Promise<Rec
       return patch ? `${head}\n${patch}${patch.length < f.patch!.length ? "\n[cut: diff budget used up]" : ""}` : head;
     });
     return {
+      ...(version ? { release: { version, previous: previous ?? null, bump: previous ? bumpLevel(previous, version) : null } } : {}),
       labels: pr.labels.map((l) => l.name),
       size: { files: files.length, additions: files.reduce((n, f) => n + f.additions, 0), deletions: files.reduce((n, f) => n + f.deletions, 0) },
       description: asUntrustedData(`PR #${number} description`, pr.body ?? "(no description)"),
@@ -79,7 +147,8 @@ export async function decideFormat(event: ChangeEvent, brief: ChangeBrief, deps:
   const state = {
     audience: loadSections("decision", deps.project.id).audience ?? "(not described: assume the project's end users)",
     change_brief: brief,
-    pull_request: { number: event.pr, title: event.title, release: event.version ?? null, ...(await pullRequestFacts(event.pr, deps)) },
+    pull_request: { number: event.pr, title: event.title, release: event.version ? { version: event.version } : null, ...(await pullRequestFacts(event.pr, event.version, deps)) },
+    owner_precedents: ownerPrecedents(deps, `pr#${event.pr}`),
     held_for_digest: held.map((e) => ({ pr: e.pr, summary: (e.brief as ChangeBrief | undefined)?.summary })),
     posts_published_today: postsToday(deps),
     max_posts_per_day: deps.project.posting.maxPostsPerDay,

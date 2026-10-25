@@ -82,6 +82,8 @@ decisions:
   # Start strict; refit per question from the owner's labeled choices (opencm fit-thresholds, phase 3).
   thresholds:
     default: 0.85
+  # The owner's latest format choices (accepted or changed) go in the state as precedent.
+  historySize: 10
 
 # Telegram chat sessions. When a session's history grows past compactAtChars, the older part is
 # summarized by the compactor role and only the last keepRecentTurns of the owner's turns stay verbatim.

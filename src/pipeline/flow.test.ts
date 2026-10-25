@@ -9,6 +9,7 @@ import { answer, fakeGitHub, mockModel, pr, prRoutes, testHarness, testProject, 
 import { repoTools } from "../tools/repo.js";
 import type { ChangeBrief } from "./brief.js";
 import { composeDraft, needsRevision, weightedScore, type Draft } from "./draft.js";
+import { bumpLevel, ownerPrecedents } from "./decide.js";
 import { advance, maybeDigest } from "./flow.js";
 import type { PipelineDeps } from "./types.js";
 
@@ -191,6 +192,33 @@ describe("advance", () => {
     expect(seen).toContain("enhancement");
     expect(seen).toContain("UNTRUSTED DATA: PR #24 description");
     expect(seen).toContain("UNTRUSTED DATA: PR #24 diff");
+  });
+
+  it("tells the decision model how big a release the maintainer called it", async () => {
+    expect([bumpLevel("0.8.1", "0.9.0"), bumpLevel("0.8.1", "0.8.2"), bumpLevel("1.4.0", "2.0.0"), bumpLevel("1.0", "1.1")]).toEqual(["minor", "patch", "major", "other"]);
+    let seen = "";
+    const spy = new DecisionMock({ doDecide: async (opts: unknown) => ((seen = JSON.stringify(opts)), (await decision("hold", 0.5).doDecide(opts as any)) as any) });
+    const version = { filename: "package.json", status: "modified", additions: 1, deletions: 1, patch: '-  "version": "0.8.1",\n+  "version": "0.9.0",' };
+    const d = deps(prRoutes(pr(25), [version] as any));
+    const e = seeded(d, 25, brief(25));
+    updateEvent(d.db, e.id, { version: "0.9.0" });
+    await advance(getEventByPr(d.db, "demo", 25)!, d, spy);
+    expect(seen).toContain('"release":{"version":"0.9.0","previous":"0.8.1","bump":"minor"}');
+  });
+
+  it("shows the owner's latest choices as precedents, never the PR being decided", () => {
+    const d = deps();
+    const add = (subject: string, model: string, owner: string, at: string) =>
+      d.db
+        .prepare("INSERT INTO decisions (id, project, schema, schema_version, model, subject, state, answers, needs_owner, created_at, owner_answers, decided_at) VALUES (?, 'demo', 'content-format', 'v', 'm', ?, ?, ?, '[]', ?, ?, ?)")
+        .run(subject, subject, JSON.stringify({ change_brief: { summary: `cambio ${subject}` } }), JSON.stringify({ format: { value: model } }), at, JSON.stringify({ format: owner }), at);
+    add("pr#1", "thread", "post", "2026-10-01");
+    add("pr#2", "post", "post", "2026-10-02");
+    add("pr#3", "post", "skip", "2026-10-03");
+    expect(ownerPrecedents(d, "pr#3")).toEqual([
+      { pr: "pr#2", change: "cambio pr#2", model_chose: "post", owner_chose: "post", outcome: "accepted" },
+      { pr: "pr#1", change: "cambio pr#1", model_chose: "thread", owner_chose: "post", outcome: "changed" },
+    ]);
   });
 
   it("asks the owner when the decision model fails, instead of stopping", async () => {
