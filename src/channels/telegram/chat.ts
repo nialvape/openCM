@@ -3,6 +3,7 @@ import type { LanguageModel, ModelMessage } from "ai";
 import { z } from "zod";
 import type { HarnessConfig, ProjectConfig } from "../../core/config.js";
 import { conversationChars, renderForSummary, splitForCompaction, withSummary } from "../../core/compact.js";
+import { harnessVersions } from "../../core/context.js";
 import { runAgent, type AgentTool } from "../../core/loop.js";
 import { now } from "../../store/db.js";
 
@@ -27,17 +28,17 @@ function addTranscript(db: DatabaseSync, chatId: string, author: "owner" | "bot"
   db.prepare("INSERT INTO chat_transcript (chat_id, author, text, run_id, created_at) VALUES (?, ?, ?, ?, ?)").run(chatId, author, text, runId ?? null, now());
 }
 
-function loadSession(db: DatabaseSync, chatId: string): ModelMessage[] {
-  const row = db.prepare("SELECT messages FROM chat_sessions WHERE chat_id = ?").get(chatId) as { messages: string } | undefined;
-  return row ? JSON.parse(row.messages) : [];
+function loadSession(db: DatabaseSync, chatId: string): { messages: ModelMessage[]; harnessVersion?: string } {
+  const row = db.prepare("SELECT messages, harness_version FROM chat_sessions WHERE chat_id = ?").get(chatId) as { messages: string; harness_version: string | null } | undefined;
+  return row ? { messages: JSON.parse(row.messages), harnessVersion: row.harness_version ?? undefined } : { messages: [] };
 }
 
-function saveSession(db: DatabaseSync, chatId: string, project: string, messages: ModelMessage[], summary?: string): void {
+function saveSession(db: DatabaseSync, chatId: string, project: string, messages: ModelMessage[], harnessVersion: string, summary?: string): void {
   db.prepare(
-    `INSERT INTO chat_sessions (chat_id, project, messages, summary, updated_at) VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO chat_sessions (chat_id, project, messages, summary, harness_version, updated_at) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(chat_id) DO UPDATE SET project = excluded.project, messages = excluded.messages,
-       summary = COALESCE(excluded.summary, chat_sessions.summary), updated_at = excluded.updated_at`,
-  ).run(chatId, project, JSON.stringify(messages), summary ?? null, now());
+       summary = COALESCE(excluded.summary, chat_sessions.summary), harness_version = excluded.harness_version, updated_at = excluded.updated_at`,
+  ).run(chatId, project, JSON.stringify(messages), summary ?? null, harnessVersion, now());
 }
 
 export function resetSession(db: DatabaseSync, chatId: string): void {
@@ -99,7 +100,12 @@ export async function handleOwnerMessage(chatId: string, text: string, send: Sen
   const turn: ModelMessage = { role: "user", content: `(Today is ${today}. Tracked repo: ${deps.project.repo}.)\n\n${text}` };
   // The new message counts as the most recent turn, so it's compacted together with the session:
   // the last message out is always this turn (with the summary prefixed when one was made).
-  const compacted = await compactIfNeeded([...loadSession(db, chatId), turn], deps);
+  const session = loadSession(db, chatId);
+  // A session made under other instructions or tools teaches the model the old behavior by example
+  // (it kept writing posts by hand after it got draft_for_pr), so it starts over; the transcript stays.
+  const stale = session.messages.length > 0 && session.harnessVersion !== harnessVersions(deps.project.id, deps.harness).chat;
+  if (stale) await send("My instructions or tools changed since our last messages, so I'm starting a fresh conversation.");
+  const compacted = await compactIfNeeded([...(stale ? [] : session.messages), turn], deps);
   const latest = compacted.messages[compacted.messages.length - 1];
   const result = await runAgent({
     role: "chat",
@@ -111,7 +117,7 @@ export async function handleOwnerMessage(chatId: string, text: string, send: Sen
     db,
     model: deps.models?.chat,
   });
-  saveSession(db, chatId, deps.project.id, result.messages, compacted.summary);
+  saveSession(db, chatId, deps.project.id, result.messages, result.harnessVersion, compacted.summary);
 
   const reply = result.text.trim() || statusReply(result.status);
   addTranscript(db, chatId, "bot", reply, result.runId);

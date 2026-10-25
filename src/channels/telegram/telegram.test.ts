@@ -108,6 +108,26 @@ describe("handleOwnerMessage", () => {
     expect(statusSummary(d.db)).toMatch(/All time: 2 runs/);
   });
 
+  it("starts over when the chat's instructions or tools changed since the session was saved", async () => {
+    const chat = new MockLanguageModelV4({ doGenerate: [answer("uno"), answer("dos")] });
+    const d = deps(harness(), chat);
+    await handleOwnerMessage("42", "primero", async () => {}, d);
+    const changed = { ...d, harness: { ...d.harness, roles: { ...d.harness.roles, chat: { ...role(["get_pr", "send_message"]), maxSteps: 6 } } } };
+    const sent: string[] = [];
+    await handleOwnerMessage("42", "segundo", async (t) => void sent.push(t), changed);
+    expect(JSON.stringify(chat.doGenerateCalls[1].prompt)).not.toContain("primero");
+    expect(sent[0]).toMatch(/fresh conversation/);
+  });
+
+  it("drafts through the pipeline when the owner asks for a post", async () => {
+    const chat = new MockLanguageModelV4({ doGenerate: [call("draft_for_pr", { pr: 17 }), answer("Te mandé el draft del #17.")] });
+    const asked: unknown[] = [];
+    const d = { ...deps(harness(), chat), draftPr: async (pr: number, format?: string) => (asked.push([pr, format]), "a post draft card was sent to the owner") };
+    d.harness.roles.chat = role(["get_pr", "send_message", "draft_for_pr"]);
+    expect(await handleOwnerMessage("42", "armá un post del 17", async () => {}, d)).toBe("Te mandé el draft del #17.");
+    expect(asked).toEqual([[17, undefined]]);
+  });
+
   it("forgets the conversation after /new", async () => {
     const chat = new MockLanguageModelV4({ doGenerate: [answer("uno"), answer("dos")] });
     const d = deps(harness(), chat);

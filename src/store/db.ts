@@ -179,7 +179,10 @@ CREATE TABLE IF NOT EXISTS skill_usage (
  * Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS doesn't touch existing
  * tables, so each one is added here when missing. Append only; never rename or drop.
  */
-const ADDED_COLUMNS: [table: string, column: string, type: string][] = [["events", "draft_id", "TEXT"]];
+const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
+  ["events", "draft_id", "TEXT"],
+  ["chat_sessions", "harness_version", "TEXT"],
+];
 
 let shared: DatabaseSync | undefined;
 
