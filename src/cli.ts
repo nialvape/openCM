@@ -61,8 +61,7 @@ function required(value: string | undefined, name: string): string {
 }
 
 async function bot(projectId: string): Promise<number> {
-  const project = loadProjectConfig(projectId);
-  await startBot(project, loadHarnessConfig(project));
+  await startBot(projectId);
   return 0;
 }
 

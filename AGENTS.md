@@ -33,7 +33,10 @@ src/
                       draft.ts: writer → checks → critic, ≤2 rewrites; flow.ts: advance() one event, digest
   checks/checks.ts    deterministic checks on drafts: weighted length, link policy, claims vs brief, banned terms, secrets
   evals/run.ts        eval runner: core cases (evals/cases, e.g. prompt injection) + project cases; reports in data/
-  channels/telegram/  bot.ts: grammY long polling, owner-only; chat.ts: one owner message → one chat run
+  channels/telegram/  bot.ts: grammY long polling, owner-only, watch loop every watch.pollMinutes;
+                      cards.ts: draft cards and format questions with buttons; chat.ts: one owner message → one chat run
+  pipeline/review.ts  what the owner's buttons do: approve, reject, edit (verbatim or instruction), change format;
+                      every choice is stored as a label for the decision model
   store/db.ts         SQLite (node:sqlite) in data/opencm.sqlite; events.ts: merged PRs and their status
 data/                 GITIGNORED: database, traces, clones, outputs
 ```
