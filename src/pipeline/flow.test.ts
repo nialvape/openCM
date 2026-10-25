@@ -127,6 +127,17 @@ describe("composeDraft", () => {
     expect(JSON.stringify(writer.doGenerateCalls[0].prompt)).toContain("Each post at most 280 characters");
   });
 
+  it("adds a link reply only when the decision said readers need one", async () => {
+    const withLink = () => mockModel(answer(draftJson({ posts: [{ text: "Ya podés usar la TUP.", claims: ["16:c1"] }], linkReply: "Repo: https://github.com/o/r" })));
+    const asked = withLink();
+    const plain = await composeDraft({ format: "post", briefs: [brief(16)] }, deps({}, { writer: asked, critic: mockModel(answer(okCritique)) }));
+    expect(plain.draft.linkReply).toBeUndefined();
+    expect(JSON.stringify(asked.doGenerateCalls[0].prompt)).toContain("leave linkReply out");
+
+    const wanted = await composeDraft({ format: "post", briefs: [brief(16)], wantsLink: true }, deps({}, { writer: withLink(), critic: mockModel(answer(okCritique)) }));
+    expect(wanted.draft.linkReply).toBe("Repo: https://github.com/o/r");
+  });
+
   it("keeps measuring while a post is over, and says to stop once all fit", async () => {
     const tool = measurePostsTool();
     for (let i = 0; i < 4; i++) expect(await tool.execute({ posts: ["a".repeat(300)] })).toContain("OVER by 20");

@@ -76,9 +76,11 @@ function writeTask(o: WriteOptions, deps: PipelineDeps, issues: string[]): strin
       ? "Don't include any link or domain name."
       : linkPolicy === "inline"
         ? "A link may go in the last post if readers need it."
-        : o.wantsLink === false
-          ? "Don't include any link or domain name; leave linkReply out."
-          : "Don't put links or domain names in the posts. If readers need one, put it in linkReply (a reply under the last post).";
+        : // A link reply costs about 13 posts, so it's only offered when the decision said it's worth it;
+          // drafts the decision model didn't see (the owner's format, combined PRs, digests) get none.
+          o.wantsLink === true
+          ? "Don't put links or domain names in the posts. Put the link readers need in linkReply (a reply under the last post): a specific page, never just the repo or the project's homepage."
+          : "Don't include any link or domain name; leave linkReply out.";
   return [
     `Write a ${o.format} for X about the changes in the briefs below (${min === max ? `${min} post` : `${min} to ${max} posts`}). Load the ${SKILL_FOR[o.format]} skill first.`,
     `Language: ${deps.project.language}. Each post at most ${X_LIMIT} characters. Before answering, measure your posts with measure_posts and shorten any that are over. ${links}`,
@@ -108,7 +110,9 @@ async function write(o: WriteOptions, deps: PipelineDeps, issues: string[]): Pro
     db: deps.db,
     model: deps.models?.writer,
   });
-  return { ...value, format: o.format };
+  // The prompt says no link reply unless one is wanted; the code makes sure, since each one costs money.
+  const { linkReply, ...rest } = value;
+  return { ...rest, format: o.format, ...(o.wantsLink === true && linkReply ? { linkReply } : {}) };
 }
 
 async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps): Promise<Critique> {

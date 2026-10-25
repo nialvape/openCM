@@ -38,5 +38,6 @@ questions:
   link_worth_cost:
     type: boolean
     instructions: >-
-      Readers need a link (install, docs, release notes) to act on this content. A post with a link
-      costs about 13 times more than one without.
+      Readers need a link to a specific page (an install guide, a docs page, the release notes) to
+      act on this content. A post with a link costs about 13 times more than one without. A link to
+      the repo or the project's homepage alone is never worth it: followers find those in the profile.

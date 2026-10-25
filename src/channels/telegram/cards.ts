@@ -42,7 +42,7 @@ function renderPosts(d: Draft): string {
     const label = d.posts.length > 1 ? `${i + 1}/${d.posts.length}` : "Post";
     return `${label} · ${lengths[i].length}/${X_LIMIT}${lengths[i].fits ? "" : " ⚠️"}\n${p.text}`;
   });
-  if (d.linkReply) posts.push(`↳ Reply with the link\n${d.linkReply}`);
+  if (d.linkReply) posts.push(`↳ Posted as a reply under it (has a link: costs about 13 posts)\n${d.linkReply}`);
   return posts.join("\n\n");
 }
 
