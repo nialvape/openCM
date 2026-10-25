@@ -2,7 +2,8 @@
 # Behavior lives here, not in prompt prose: models, tool allowlists and budgets are enforced in code.
 
 # Every role also takes maxOutputTokens (default 4000) and stepTimeoutSec (default 180): caps per model call,
-# so a runaway generation stops early instead of running for minutes and costing dollars.
+# so a runaway generation stops early instead of running for minutes and costing dollars. And reasoning
+# (none | minimal | low | medium | high; default: the provider's) for how much the model may think.
 # Model ids are "<provider>:<model>". Providers: openrouter (default; ids are "<vendor>/<model>" from
 # https://openrouter.ai/models), anthropic, openai, google (direct APIs).
 # The critic uses a different model family than the writer on purpose (same-family judges favor their own output).
@@ -15,11 +16,12 @@ roles:
     plan: false
   writer:
     model: openrouter:~z-ai/glm-latest
-    tools: [load_skill]
-    maxSteps: 6
+    tools: [load_skill, measure_posts]
+    maxSteps: 10
     maxCostUsd: 0.20
     plan: false
     maxOutputTokens: 3000
+    reasoning: low
   critic:
     model: openrouter:anthropic/claude-sonnet-5.5
     tools: []

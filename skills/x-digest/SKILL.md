@@ -10,3 +10,5 @@ Shape:
 3. Split into more posts only when one post can't hold the lines within 280 characters.
 
 Leave out anything internal. If after removing internal items fewer than two remain, say so plainly in a single post.
+
+Length: aim for at most 240 characters per post (X cuts at 280). Check with measure_posts, never by counting yourself.

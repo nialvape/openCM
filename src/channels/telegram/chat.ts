@@ -105,6 +105,8 @@ function statusReply(status: string): string {
   switch (status) {
     case "max_steps":
       return "I ran out of steps before finishing. Ask again more narrowly, or raise roles.chat.maxSteps in config.";
+    case "length":
+      return "My answer hit the output limit before I finished. Ask again more narrowly, or raise roles.chat.maxOutputTokens in config.";
     case "budget":
       return "I stopped at the cost limit for one answer (roles.chat.maxCostUsd in config).";
     case "error":

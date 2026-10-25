@@ -4,13 +4,14 @@ import { paths } from "./paths.js";
 
 export type TraceEvent =
   | { type: "run_start"; role: string; model: string; harnessVersion: string; task: string }
-  | { type: "step"; step: number; finishReason: string; inputTokens?: number; outputTokens?: number; cachedTokens?: number; costUsd?: number }
+  | { type: "step"; step: number; finishReason: string; inputTokens?: number; outputTokens?: number; reasoningTokens?: number; cachedTokens?: number; costUsd?: number }
   | { type: "tool_call"; step: number; tool: string; input: unknown }
   | { type: "tool_result"; step: number; tool: string; chars: number; truncated: boolean; error?: string }
   | { type: "tool_blocked"; step: number; tool: string; reason: string }
   | { type: "run_end"; status: RunStatus; steps: number; costUsd?: number; error?: string };
 
-export type RunStatus = "done" | "max_steps" | "budget" | "error";
+/** "length": the last call hit maxOutputTokens, so the answer is cut or missing. */
+export type RunStatus = "done" | "length" | "max_steps" | "budget" | "error";
 
 /** One JSONL file per run in data/traces/. Append-only, so a crash leaves a readable partial trace. */
 export class Trace {

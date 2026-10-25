@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { runChecks, POSTS_PER_FORMAT, type CheckIssue } from "../checks/checks.js";
+import { measurePostsTool, X_TARGET } from "../tools/measure.js";
 import { asUntrustedData } from "../core/policy.js";
 import { runAgentJson } from "../core/structured.js";
 import { now } from "../store/db.js";
@@ -78,7 +79,7 @@ function writeTask(o: WriteOptions, deps: PipelineDeps, issues: string[]): strin
           : "Don't put links or domain names in the posts. If readers need one, put it in linkReply (a reply under the last post).";
   return [
     `Write a ${o.format} for X about the changes in the briefs below (${min === max ? `${min} post` : `${min} to ${max} posts`}). Load the ${SKILL_FOR[o.format]} skill first.`,
-    `Language: ${deps.project.language}. Each post at most 280 characters. ${links}`,
+    `Language: ${deps.project.language}. Aim for at most ${X_TARGET} characters per post (about 35 to 40 words); X cuts at 280. Before answering, measure your posts with measure_posts and shorten any that are over. ${links}`,
     'Each post lists in "claims" the changes it states, as "<pr>:<change id>" (e.g. "16:c1"). Only state what the briefs support.',
     o.extra ?? "",
     o.previous ? `Previous version:\n${JSON.stringify(o.previous, null, 2)}` : "",
@@ -99,6 +100,7 @@ async function write(o: WriteOptions, deps: PipelineDeps, issues: string[]): Pro
     role: "writer",
     projectId: deps.project.id,
     task: writeTask(o, deps, issues),
+    tools: { measure_posts: measurePostsTool() },
     harness: deps.harness,
     db: deps.db,
     model: deps.models?.writer,
@@ -133,6 +135,65 @@ export interface ComposedDraft {
 
 const formatIssues = (issues: CheckIssue[]) => issues.map((i) => `${i.where}: ${i.message}`);
 
+/** Problems confined to one post's text, which can be fixed without touching the rest of the draft. */
+const LOCAL_CHECKS = new Set<CheckIssue["check"]>(["length", "link_policy", "banned_term", "secret"]);
+// A link reply in a project that doesn't use one is a structural problem: rewriting its text won't fix it.
+const isLocal = (i: CheckIssue) => LOCAL_CHECKS.has(i.check) && (/^post \d+$/.test(i.where) || (i.where === "link reply" && i.check !== "link_policy"));
+/** Rounds of local repair per draft; each round is one short call per failing post. */
+const REPAIR_ROUNDS = 2;
+const VARIANTS = 3;
+
+const VariantsSchema = z.object({ variants: z.array(z.string().min(1)).min(1).max(VARIANTS) });
+
+function withText(draft: Draft, where: string, text: string): Draft {
+  if (where === "link reply") return { ...draft, linkReply: text };
+  const index = Number(where.slice("post ".length)) - 1;
+  return { ...draft, posts: draft.posts.map((p, i) => (i === index ? { ...p, text } : p)) };
+}
+
+const textAt = (draft: Draft, where: string) => (where === "link reply" ? (draft.linkReply ?? "") : draft.posts[Number(where.slice("post ".length)) - 1].text);
+
+/** Asks for a few rewrites of one post and keeps the first that passes the checks for that post. */
+async function repairOne(draft: Draft, where: string, problems: CheckIssue[], o: WriteOptions, deps: PipelineDeps): Promise<Draft> {
+  const { value } = await runAgentJson(VariantsSchema, {
+    role: "writer",
+    projectId: deps.project.id,
+    task: [
+      `This ${where} of a ${draft.format} for X needs fixing:`,
+      problems.map((p) => `- ${p.message}`).join("\n"),
+      `Current text:\n${textAt(draft, where)}`,
+      `Write ${VARIANTS} alternative versions that fix it, keeping the meaning, the facts and the language (${deps.project.language}). Aim for at most ${X_TARGET} characters; measure them with measure_posts before answering.`,
+      'Answer with only JSON: {"variants": ["...", "..."]}',
+      asUntrustedData("change briefs", JSON.stringify(o.briefs, null, 2)),
+    ].join("\n\n"),
+    tools: { measure_posts: measurePostsTool() },
+    harness: deps.harness,
+    db: deps.db,
+    model: deps.models?.writer,
+  });
+  const candidates = value.variants.map((v) => {
+    const next = withText(draft, where, v);
+    return { next, left: runChecks(next, o.briefs, deps.project).filter((i) => i.where === where).length };
+  });
+  // Variants that still fail aren't worse than the original; the next round or a rewrite tries again.
+  return candidates.find((c) => c.left === 0)?.next ?? candidates.sort((a, b) => a.left - b.left)[0].next;
+}
+
+/**
+ * Fixes problems local to single posts (too long, a link, a banned term) with one short call per
+ * failing post, before falling back to rewriting the whole draft. Returns the draft and its checks.
+ */
+async function repairLocal(draft: Draft, o: WriteOptions, deps: PipelineDeps): Promise<{ draft: Draft; issues: CheckIssue[] }> {
+  let issues = runChecks(draft, o.briefs, deps.project);
+  for (let round = 0; round < REPAIR_ROUNDS && issues.length > 0 && issues.every(isLocal); round++) {
+    for (const where of [...new Set(issues.map((i) => i.where))]) {
+      draft = await repairOne(draft, where, issues.filter((i) => i.where === where), o, deps);
+    }
+    issues = runChecks(draft, o.briefs, deps.project);
+  }
+  return { draft, issues };
+}
+
 /**
  * Writer → deterministic checks → critic, with at most `maxRevisions` rewrites. Checks failing
  * after the last rewrite are kept on the draft so the owner sees them; the owner always decides.
@@ -140,8 +201,7 @@ const formatIssues = (issues: CheckIssue[]) => issues.map((i) => `${i.where}: ${
 export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxRevisions = 2): Promise<ComposedDraft> {
   const examples = input.memory === false ? [] : selectExamples(deps.db, deps.project.id, input.format, deps.harness.memory.examplesPerDraft);
   const o: WriteOptions = { ...input, extra: [input.extra, examplesBlock(examples)].filter(Boolean).join("\n\n") || undefined };
-  let draft = await write(o, deps, []);
-  let issues = runChecks(draft, o.briefs, deps.project);
+  let { draft, issues } = await repairLocal(await write(o, deps, []), o, deps);
   let revisions = 0;
   let review: Critique | undefined;
 
@@ -153,8 +213,7 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
       break;
     }
     const feedback = issues.length ? formatIssues(issues) : review!.fixes.length ? review!.fixes : ["The reviewer asked for a better version."];
-    draft = await write({ ...o, previous: draft }, deps, feedback);
-    issues = runChecks(draft, o.briefs, deps.project);
+    ({ draft, issues } = await repairLocal(await write({ ...o, previous: draft }, deps, feedback), o, deps));
     review = undefined;
     revisions++;
   }

@@ -33,6 +33,18 @@ export async function runAgentJson<T>(schema: z.ZodType<T>, opts: RunOptions, re
   let result = await runAgent(opts);
   runs.push(result);
   for (let attempt = 0; ; attempt++) {
+    if (result.status === "length" && attempt < retries) {
+      // Ran out of output budget, usually while reasoning. Start over (the partial thinking would only
+      // fill the context) with reasoning off and a reminder to answer directly.
+      result = await runAgent({
+        ...opts,
+        resumeRunId: undefined,
+        reasoning: "none",
+        task: `${opts.task}\n\nAnswer directly with the JSON. Don't draft or count in your reasoning; use the tools for measuring.`,
+      });
+      runs.push(result);
+      continue;
+    }
     if (result.status !== "done") throw new StructuredOutputError(`${opts.role} stopped with status '${result.status}' (run ${result.runId})`);
     const checked = validate(schema, result.text);
     if (checked.ok) return { value: checked.value, runs };

@@ -14,6 +14,11 @@ export const RoleConfigSchema = z.object({
   maxOutputTokens: z.number().int().positive().default(4000),
   /** Seconds one model call may take before it is aborted. */
   stepTimeoutSec: z.number().positive().default(180),
+  /**
+   * Reasoning effort per call. Omitted = the provider default. Writers do better low: given room,
+   * reasoning models draft whole threads in their thinking and count characters by hand until they run out.
+   */
+  reasoning: z.enum(["none", "minimal", "low", "medium", "high"]).optional(),
 });
 
 const PriceSchema = z.object({
@@ -95,6 +100,7 @@ export const ProjectConfigSchema = z.object({
 });
 
 export type RoleConfig = z.infer<typeof RoleConfigSchema>;
+export type ReasoningEffort = NonNullable<RoleConfig["reasoning"]>;
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 export type DecisionsConfig = z.infer<typeof DecisionsConfigSchema>;
 export type XConfig = z.infer<typeof XConfigSchema>;

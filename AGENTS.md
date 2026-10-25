@@ -27,6 +27,7 @@ src/
   sources/github/     client.ts: thin GitHub REST client; changes.ts: merged-PR polling, diff elision,
                       prefilter (no model), version-bump detection
   tools/repo.ts       read-only repo tools for agents (repo_list, repo_read_file, repo_diff, repo_search, list_prs, get_pr)
+  tools/measure.ts    measure_posts: X's exact weighted length per post; the only way agents get a character count
   pipeline/           watch.ts: poll → prefilter → brief (analyst) → patch notes on a release
                       brief.ts: ChangeBrief schema (each change with file evidence); patch-notes.ts
                       decide.ts: format via the decision model + guards (release → thread, daily cap → hold)
@@ -54,6 +55,7 @@ data/                 GITIGNORED: database, traces, clones, outputs
 - **Policy is code.** A role only gets the tools its config lists; budgets come from config. Don't write "never do X" in a prompt when code can prevent X.
 - **No agent publishes.** Publishing and memory writes are plain code triggered by an owner approval, never a tool.
 - **Stable prompt prefix.** Anything that changes per task goes in the user message (`task`), not in a prompt section.
+- **Models never count.** Lengths come from code (`measure_posts`, `runChecks`), never from a model's estimate. Fix a failing post on its own before rewriting a whole draft.
 - **Untrusted text is fenced.** PR bodies, commits and issues reach the model through `asUntrustedData`.
 - **Project-specific content never goes in the core.** If it's about one repo, it belongs in `projects/<id>/`.
 - **Every harness change is measured.** Prompt, skill and config changes change the harness version; run the evals before relying on a new version (from phase 3).

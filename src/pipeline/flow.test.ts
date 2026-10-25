@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Experimental_DecisionMockModelV4 as DecisionMock } from "ai/test";
 import { runChecks } from "../checks/checks.js";
+import { measurePostsTool } from "../tools/measure.js";
 import { summarize, withOverrides } from "../evals/run.js";
 import { openDb } from "../store/db.js";
 import { addEvent, getEventByPr, updateEvent } from "../store/events.js";
-import { answer, fakeGitHub, mockModel, pr, prRoutes, testHarness, testProject } from "../test-helpers.js";
+import { answer, fakeGitHub, mockModel, pr, prRoutes, testHarness, testProject, toolCall } from "../test-helpers.js";
 import { repoTools } from "../tools/repo.js";
 import type { ChangeBrief } from "./brief.js";
 import { composeDraft, needsRevision, weightedScore, type Draft } from "./draft.js";
@@ -74,23 +75,72 @@ describe("deterministic checks", () => {
 });
 
 describe("composeDraft", () => {
-  it("rewrites after failed checks, then after the critic, and stores the result", async () => {
+  it("repairs a failing post on its own, rewrites after the critic, and stores the result", async () => {
     const writer = mockModel(
       answer(draftJson({ posts: [{ text: "Mirá github.com/o/r", claims: ["16:c1"] }] })),
-      answer(draftJson({ posts: [{ text: "Todas las regionales ya funcionan.", claims: ["16:c1"] }] })),
+      // Local repair: three variants, the first still has a domain, the second passes.
+      answer(JSON.stringify({ variants: ["Ver github.com/o/r", "Todas las regionales ya funcionan.", "Otra"] })),
       answer(draftJson({ posts: [{ text: "Ya podés usar la TUP.", claims: ["16:c1"] }] })),
     );
     const critic = mockModel(answer(badCritique), answer(okCritique));
     const d = deps({}, { writer, critic });
     const out = await composeDraft({ format: "post", briefs: [brief(16)] }, d);
 
-    expect(out.revisions).toBe(2);
+    expect(out.revisions).toBe(1);
     expect(out.issues).toEqual([]);
     expect(out.draft.posts[0].text).toBe("Ya podés usar la TUP.");
-    expect(JSON.stringify(writer.doGenerateCalls[1].prompt)).toContain("Links go only in linkReply");
+    const repairPrompt = JSON.stringify(writer.doGenerateCalls[1].prompt);
+    expect(repairPrompt).toContain("This post 1 of a post for X needs fixing");
+    expect(repairPrompt).toContain("Mirá github.com/o/r");
+    // The critic reviewed the repaired version, then its fixes went into a full rewrite.
+    expect(JSON.stringify(critic.doGenerateCalls[0].prompt)).toContain("Todas las regionales ya funcionan.");
     expect(JSON.stringify(writer.doGenerateCalls[2].prompt)).toContain("todas las regionales");
     const row = d.db.prepare("SELECT status, revisions FROM drafts WHERE id = ?").get(out.id) as any;
-    expect(row).toMatchObject({ status: "pending", revisions: 2 });
+    expect(row).toMatchObject({ status: "pending", revisions: 1 });
+  });
+
+  it("repairs only the long post of a thread and leaves the others as they were", async () => {
+    const long = "a ".repeat(150).trim();
+    const writer = mockModel(
+      answer(JSON.stringify({ format: "thread", posts: [{ text: "Primero", claims: ["16:c1"] }, { text: long, claims: ["16:c1"] }] })),
+      answer(JSON.stringify({ variants: ["Segundo, corto"] })),
+    );
+    const d = deps({}, { writer, critic: mockModel(answer(okCritique)) });
+    const out = await composeDraft({ format: "thread", briefs: [brief(16)] }, d);
+    expect(out.draft.posts.map((p) => p.text)).toEqual(["Primero", "Segundo, corto"]);
+    expect(out.revisions).toBe(0);
+  });
+
+  it("gives the writer the measuring tool and its exact counts", async () => {
+    const writer = mockModel(
+      toolCall("measure_posts", { posts: ["Ya podés usar la TUP 🎉"] }),
+      answer(draftJson({ posts: [{ text: "Ya podés usar la TUP 🎉", claims: ["16:c1"] }] })),
+    );
+    const d = deps({}, { writer, critic: mockModel(answer(okCritique)) });
+    d.harness = { ...d.harness, roles: { ...d.harness.roles, writer: { ...d.harness.roles.writer, tools: ["measure_posts"] } } };
+    await composeDraft({ format: "post", briefs: [brief(16)] }, d);
+    const afterTool = JSON.stringify(writer.doGenerateCalls[1].prompt);
+    // 21 characters plus an emoji, which X counts as 2.
+    expect(afterTool).toContain("post 1: 23/280, fits");
+    expect(afterTool).toContain("All posts fit. Stop measuring");
+    expect(JSON.stringify(writer.doGenerateCalls[0].prompt)).toContain("Aim for at most 240 characters");
+  });
+
+  it("stops the writer from measuring in a loop", async () => {
+    const tool = measurePostsTool(2);
+    expect(await tool.execute({ posts: ["a".repeat(300)] })).toContain("OVER by 20");
+    expect(await tool.execute({ posts: ["corto"] })).toContain("All posts fit");
+    expect(await tool.execute({ posts: ["corto"] })).toContain("Give your answer now");
+  });
+
+  it("retries without reasoning when a call runs out of output while thinking", async () => {
+    const cutOff = { ...answer(""), finishReason: { unified: "length" as const, raw: "length" } };
+    const writer = mockModel(cutOff, answer(draftJson({ posts: [{ text: "Ya podés usar la TUP.", claims: ["16:c1"] }] })));
+    const d = deps({}, { writer, critic: mockModel(answer(okCritique)) });
+    const out = await composeDraft({ format: "post", briefs: [brief(16)] }, d);
+    expect(out.draft.posts[0].text).toBe("Ya podés usar la TUP.");
+    expect(writer.doGenerateCalls[1].reasoning).toBe("none");
+    expect(JSON.stringify(writer.doGenerateCalls[1].prompt)).toContain("Don't draft or count in your reasoning");
   });
 });
 

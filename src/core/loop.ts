@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { generateText, tool, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import { z } from "zod";
-import { roleConfig, type HarnessConfig } from "./config.js";
+import { roleConfig, type HarnessConfig, type ReasoningEffort } from "./config.js";
 import { assemblePrompt, loadSections, type SectionName } from "./context.js";
 import { costUsd, resolveModel } from "./models.js";
 import { allowedTools, limitOutput, scrubSecrets } from "./policy.js";
@@ -29,6 +29,8 @@ export interface RunOptions {
   sections?: Partial<Record<SectionName, string>>;
   /** Earlier turns of a conversation (chat sessions); the task is appended as the newest user message. */
   history?: ModelMessage[];
+  /** Overrides the role's reasoning effort for this run, e.g. to retry a call that ran out while thinking. */
+  reasoning?: ReasoningEffort;
   /** Resume this run from its last checkpoint instead of starting a new one. */
   resumeRunId?: string;
   /** Injected for tests and evals; otherwise resolved from the role's config. */
@@ -121,6 +123,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
         tools,
         maxOutputTokens: rc.maxOutputTokens,
         timeout: rc.stepTimeoutSec ? { stepMs: rc.stepTimeoutSec * 1000 } : undefined,
+        reasoning: opts.reasoning ?? rc.reasoning,
       });
       step++;
       messages = [...messages, ...result.responseMessages];
@@ -133,6 +136,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
         finishReason: result.finishReason,
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
+        reasoningTokens: result.usage.outputTokenDetails?.reasoningTokens,
         cachedTokens: result.usage.inputTokenDetails?.cacheReadTokens,
         costUsd: cost,
       });
@@ -142,7 +146,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
       store.prepare("UPDATE runs SET steps = ?, cost_usd = ?, updated_at = ? WHERE id = ?").run(step, spent ?? null, now(), runId);
 
       if (result.finishReason !== "tool-calls") {
-        status = "done";
+        status = result.finishReason === "length" ? "length" : "done";
         text = result.text;
         break;
       }

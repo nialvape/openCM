@@ -15,3 +15,5 @@ Do:
 Don't:
 - Hashtags, unless the voice says so. Hype words ("revolutionary", "game changer", "🚀🚀"). Internal names (function names, file paths, PR jargon).
 - Links or domain names in the post when the project puts links in a reply.
+
+Length: aim for at most 240 characters per post (X cuts at 280). Check with measure_posts, never by counting yourself.
