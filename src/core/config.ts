@@ -45,6 +45,18 @@ export const ProjectConfigSchema = z.object({
   prefilter: z
     .object({ ignorePaths: z.array(z.string()).default([]), ignoreLabels: z.array(z.string()).default([]) })
     .default({ ignorePaths: [], ignoreLabels: [] }),
+  watch: z
+    .object({
+      /** Minutes between checks for newly merged PRs while the bot runs. */
+      pollMinutes: z.number().positive().default(5),
+      /** First run only: PRs merged after this ISO date are processed. Default: the last 24 hours. */
+      startFrom: z.string().datetime({ offset: true }).optional(),
+    })
+    .prefault({}),
+  /** Files whose version line marks a release, e.g. package.json. `pattern` captures the version. */
+  versionFiles: z
+    .array(z.object({ path: z.string(), pattern: z.string() }))
+    .default([{ path: "package.json", pattern: '"version"\\s*:\\s*"([^"]+)"' }]),
   harness: z.record(z.string(), z.unknown()).default({}),
 });
 

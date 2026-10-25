@@ -54,6 +54,7 @@ export interface PullRequest {
   body: string | null;
   state: string;
   merged_at: string | null;
+  updated_at: string;
   html_url: string;
   user: { login: string } | null;
   labels: { name: string }[];
@@ -61,6 +62,7 @@ export interface PullRequest {
   deletions: number;
   changed_files: number;
   base: { ref: string };
+  merge_commit_sha?: string | null;
   head: { ref: string };
 }
 
@@ -69,6 +71,8 @@ export interface PullRequestFile {
   status: string;
   additions: number;
   deletions: number;
+  /** Unified diff of the file; GitHub omits it for binary or very large files. */
+  patch?: string;
 }
 
 export interface CodeSearchResult {

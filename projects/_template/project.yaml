@@ -19,3 +19,14 @@ prefilter:
 harness: {}
 #  roles:
 #    writer: { model: openai:gpt-6.1-sol }
+
+watch:
+  # Minutes between checks for newly merged PRs while the bot runs.
+  pollMinutes: 5
+  # First run only: process PRs merged after this date (default: the last 24 hours).
+  # startFrom: 2026-10-01T00:00:00Z
+
+# Files whose version line marks a release; `pattern` captures the version.
+versionFiles:
+  - path: package.json
+    pattern: '"version"\s*:\s*"([^"]+)"'

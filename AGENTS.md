@@ -12,7 +12,7 @@ skills/<name>/SKILL.md  generic skills (frontmatter: name, description); loaded 
 projects/_template/   committed example of a project folder
 projects/<id>/        GITIGNORED: everything particular to a tracked repo (language, voice, skills, examples)
 src/
-  cli.ts              entry point (opencm bot | doctor | ask | resume)
+  cli.ts              entry point (opencm bot | run | pr | doctor | ask | resume)
   core/
     config.ts         loads config/default.yaml + the project's `harness:` override, validated with zod
     models.ts         "<provider>:<model>" → AI SDK model (OpenRouter by default); cost reported by OpenRouter or from config pricing
@@ -23,10 +23,14 @@ src/
     decision.ts       decision model call (OpenRouter Decisions API) + confidence gate; low-confidence answers go to the owner
     compact.ts        chat session compaction: split at a user turn, summary rides in the first kept turn
     trace.ts          JSONL trace per run in data/traces/
-  sources/github/     thin GitHub REST client (fetch), only the fields openCM reads
-  tools/repo.ts       read-only repo tools for agents (repo_list, repo_read_file, repo_search, list_prs, get_pr)
+    structured.ts     runAgentJson: final answer must be JSON matching a zod schema, one corrective retry
+  sources/github/     client.ts: thin GitHub REST client; changes.ts: merged-PR polling, diff elision,
+                      prefilter (no model), version-bump detection
+  tools/repo.ts       read-only repo tools for agents (repo_list, repo_read_file, repo_diff, repo_search, list_prs, get_pr)
+  pipeline/           watch.ts: poll → prefilter → brief (analyst) → patch notes on a release
+                      brief.ts: ChangeBrief schema (each change with file evidence); patch-notes.ts
   channels/telegram/  bot.ts: grammY long polling, owner-only; chat.ts: one owner message → one chat run
-  store/db.ts         SQLite (node:sqlite) in data/opencm.sqlite
+  store/db.ts         SQLite (node:sqlite) in data/opencm.sqlite; events.ts: merged PRs and their status
 data/                 GITIGNORED: database, traces, clones, outputs
 ```
 

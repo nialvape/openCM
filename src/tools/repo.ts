@@ -1,10 +1,28 @@
 import { z } from "zod";
 import type { AgentTool } from "../core/loop.js";
 import { asUntrustedData } from "../core/policy.js";
+import { elideFiles } from "../sources/github/changes.js";
 import type { CodeSearchResult, ContentEntry, FileContent, GitHubClient, PullRequest, PullRequestFile } from "../sources/github/client.js";
 
 /** Lines returned per repo_read_file call; the model pages with startLine. */
 const READ_PAGE_LINES = 300;
+/** Characters of diff per repo_diff page. */
+const DIFF_PAGE_CHARS = 10000;
+
+/** Groups blocks into pages of at most `max` characters (a single bigger block gets its own page). */
+export function paginate(blocks: string[], max: number): string[] {
+  const pages: string[] = [];
+  let current = "";
+  for (const b of blocks) {
+    if (current && current.length + b.length + 2 > max) {
+      pages.push(current);
+      current = "";
+    }
+    current += (current ? "\n\n" : "") + b;
+  }
+  if (current) pages.push(current);
+  return pages;
+}
 
 const encodePath = (path: string) => path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
 const refQuery = (ref?: string) => (ref ? `?ref=${encodeURIComponent(ref)}` : "");
@@ -13,7 +31,7 @@ const refQuery = (ref?: string) => (ref ? `?ref=${encodeURIComponent(ref)}` : ""
  * Read-only tools over the tracked repo, through the GitHub API. Everything that comes from the
  * repo (code, PR text) is fenced as untrusted data: it may contain text written to steer the model.
  */
-export function repoTools(gh: GitHubClient): Record<string, AgentTool> {
+export function repoTools(gh: GitHubClient, ignorePaths: string[] = []): Record<string, AgentTool> {
   const r = gh.repo;
   return {
     repo_list: {
@@ -69,6 +87,25 @@ export function repoTools(gh: GitHubClient): Record<string, AgentTool> {
         const merged = prs.filter((p) => p.merged_at).sort((a, b) => b.merged_at!.localeCompare(a.merged_at!)).slice(0, limit);
         if (merged.length === 0) return "No merged pull requests found.";
         return asUntrustedData("merged pull requests", merged.map((p) => `#${p.number} ${p.merged_at!.slice(0, 10)} ${p.title}`).join("\n"));
+      },
+    },
+
+    repo_diff: {
+      description: `Shows the diff of a pull request file by file, ${DIFF_PAGE_CHARS} characters per page. Lockfiles, generated and ignored files show only line counts.`,
+      inputSchema: z.object({
+        number: z.number().int().positive().describe("PR number, e.g. 16"),
+        page: z.number().int().positive().optional().describe("Page of the diff, starting at 1"),
+      }),
+      execute: async ({ number, page = 1 }: { number: number; page?: number }) => {
+        const files = await gh.get<PullRequestFile[]>(`/repos/${r}/pulls/${number}/files?per_page=100`);
+        const blocks = elideFiles(files, ignorePaths).map((f) =>
+          [`### ${f.status} ${f.file} (+${f.additions} −${f.deletions})${f.elided ? ` [${f.elided}]` : ""}`, f.patch ?? ""].join("\n").trimEnd(),
+        );
+        const pages = paginate(blocks, DIFF_PAGE_CHARS);
+        if (pages.length === 0) return `PR #${number} changes no files.`;
+        if (page > pages.length) return `PR #${number} has only ${pages.length} diff pages.`;
+        const more = page < pages.length ? `\n[page ${page} of ${pages.length}; call again with page ${page + 1}]` : `\n[page ${page} of ${pages.length}]`;
+        return asUntrustedData(`diff of PR #${number}`, pages[page - 1]) + more;
       },
     },
 

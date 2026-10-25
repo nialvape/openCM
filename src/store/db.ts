@@ -61,6 +61,29 @@ CREATE TABLE IF NOT EXISTS chat_transcript (
   run_id TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cursors (
+  project TEXT PRIMARY KEY,
+  merged_after TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  pr INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  merged_at TEXT NOT NULL,
+  version TEXT,
+  status TEXT NOT NULL,
+  reason TEXT,
+  brief TEXT,
+  format TEXT,
+  decision_id TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_project_status ON events (project, status);
 CREATE TABLE IF NOT EXISTS skill_usage (
   run_id TEXT NOT NULL REFERENCES runs(id),
   skill TEXT NOT NULL,

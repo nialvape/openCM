@@ -9,11 +9,17 @@ import { runAgent } from "./core/loop.js";
 import { startBot } from "./channels/telegram/bot.js";
 import { modelFamily } from "./core/models.js";
 import { discoverSkills, skillsIndex } from "./core/skills.js";
+import { pipelineDeps } from "./pipeline/deps.js";
+import { analyzeEvent, pendingEvents, poll, type StepResult } from "./pipeline/watch.js";
+import { getPullRequest } from "./sources/github/changes.js";
+import { addEvent, getEventByPr } from "./store/events.js";
 
 const USAGE = `opencm — Community Manager agent harness
 
 Usage:
   opencm bot <project>                    Start the Telegram bot (long polling, owner only)
+  opencm run <project>                    Check GitHub once for newly merged PRs and process them
+  opencm pr <project> <number>            Process one merged PR now, even an old one
   opencm doctor <project>                 Validate config, list skills and the harness version of each role
   opencm ask <project> <role> "<task>"    Run one role on a free-form task (smoke test)
   opencm resume <project> <role> <runId>  Resume an interrupted run from its last checkpoint
@@ -27,6 +33,10 @@ async function main(argv: string[]): Promise<number> {
   switch (command) {
     case "bot":
       return bot(required(args[0], "project"));
+    case "run":
+      return runOnce(required(args[0], "project"));
+    case "pr":
+      return processPr(required(args[0], "project"), Number(required(args[1], "number")));
     case "doctor":
       return doctor(required(args[0], "project"));
     case "ask":
@@ -48,6 +58,34 @@ async function bot(projectId: string): Promise<number> {
   const project = loadProjectConfig(projectId);
   await startBot(project, loadHarnessConfig(project));
   return 0;
+}
+
+function report(r: StepResult): void {
+  if (r.status === "briefed") {
+    console.log(`PR #${r.pr}: briefed — ${r.brief.summary}`);
+    if (r.patchNotes) console.log(`  patch notes ${r.patchNotes.version}: ${r.patchNotes.path}`);
+  } else {
+    console.log(`PR #${r.pr}: ${r.status} — ${r.reason}`);
+  }
+}
+
+async function runOnce(projectId: string): Promise<number> {
+  const deps = pipelineDeps(projectId);
+  const added = await poll(deps);
+  console.log(`${added.length} newly merged PR(s) since the last check`);
+  for (const event of pendingEvents(deps)) report(await analyzeEvent(event, deps));
+  return 0;
+}
+
+async function processPr(projectId: string, number: number): Promise<number> {
+  if (!Number.isInteger(number) || number <= 0) throw new ConfigError("<number> must be a PR number, e.g. 16");
+  const deps = pipelineDeps(projectId);
+  const { pr } = await getPullRequest(deps.gh, number);
+  if (!pr.merged_at) throw new ConfigError(`PR #${number} is not merged`);
+  addEvent(deps.db, { project: projectId, pr: number, title: pr.title, url: pr.html_url, mergedAt: pr.merged_at });
+  const result = await analyzeEvent(getEventByPr(deps.db, projectId, number)!, deps);
+  report(result);
+  return result.status === "failed" ? 1 : 0;
 }
 
 function doctor(projectId: string): number {
