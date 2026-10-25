@@ -10,6 +10,10 @@ export const RoleConfigSchema = z.object({
   maxSteps: z.number().int().positive(),
   maxCostUsd: z.number().positive(),
   plan: z.boolean(),
+  /** Cap per model call: a runaway generation stops here instead of costing dollars. */
+  maxOutputTokens: z.number().int().positive().default(4000),
+  /** Seconds one model call may take before it is aborted. */
+  stepTimeoutSec: z.number().positive().default(180),
 });
 
 const PriceSchema = z.object({
@@ -53,6 +57,16 @@ export const ProjectConfigSchema = z.object({
       startFrom: z.string().datetime({ offset: true }).optional(),
     })
     .prefault({}),
+  posting: z
+    .object({
+      /** Posts and threads per day; past this, new changes are held for the digest. */
+      maxPostsPerDay: z.number().int().nonnegative().default(3),
+      /** Held changes that trigger a digest. */
+      digestMinItems: z.number().int().positive().default(3),
+    })
+    .prefault({}),
+  /** Words or phrases a post must never contain (checked without a model). */
+  bannedTerms: z.array(z.string()).default([]),
   /** Files whose version line marks a release, e.g. package.json. `pattern` captures the version. */
   versionFiles: z
     .array(z.object({ path: z.string(), pattern: z.string() }))

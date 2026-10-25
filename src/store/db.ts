@@ -79,11 +79,27 @@ CREATE TABLE IF NOT EXISTS events (
   brief TEXT,
   format TEXT,
   decision_id TEXT,
+  draft_id TEXT,
   attempts INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_project_status ON events (project, status);
+CREATE TABLE IF NOT EXISTS drafts (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  prs TEXT NOT NULL,
+  format TEXT NOT NULL,
+  content TEXT NOT NULL,
+  checks TEXT NOT NULL,
+  critique TEXT,
+  revisions INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  final TEXT,
+  owner_note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS skill_usage (
   run_id TEXT NOT NULL REFERENCES runs(id),
   skill TEXT NOT NULL,
@@ -91,6 +107,12 @@ CREATE TABLE IF NOT EXISTS skill_usage (
   step INTEGER NOT NULL
 );
 `;
+
+/**
+ * Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS doesn't touch existing
+ * tables, so each one is added here when missing. Append only; never rename or drop.
+ */
+const ADDED_COLUMNS: [table: string, column: string, type: string][] = [["events", "draft_id", "TEXT"]];
 
 let shared: DatabaseSync | undefined;
 
@@ -100,6 +122,10 @@ export function openDb(file = paths.db): DatabaseSync {
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!columns.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
   return db;
 }
 

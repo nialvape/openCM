@@ -114,7 +114,14 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
   try {
     while (step < rc.maxSteps) {
       currentStep = step;
-      const result = await generateText({ model, instructions: prompt.instructions, messages, tools });
+      const result = await generateText({
+        model,
+        instructions: prompt.instructions,
+        messages,
+        tools,
+        maxOutputTokens: rc.maxOutputTokens,
+        timeout: rc.stepTimeoutSec ? { stepMs: rc.stepTimeoutSec * 1000 } : undefined,
+      });
       step++;
       messages = [...messages, ...result.responseMessages];
 

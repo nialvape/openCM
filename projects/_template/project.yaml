@@ -30,3 +30,12 @@ watch:
 versionFiles:
   - path: package.json
     pattern: '"version"\s*:\s*"([^"]+)"'
+
+posting:
+  # Posts and threads per day; past this, changes are held for the digest.
+  maxPostsPerDay: 3
+  # Held changes that trigger a digest.
+  digestMinItems: 3
+
+# Words or phrases a post must never contain (checked without a model).
+bannedTerms: []

@@ -21,6 +21,7 @@ export interface ChangeEvent {
   brief?: unknown;
   format?: string;
   decisionId?: string;
+  draftId?: string;
   attempts: number;
 }
 
@@ -40,6 +41,7 @@ function fromRow(r: any): ChangeEvent {
     brief: r.brief ? JSON.parse(r.brief) : undefined,
     format: r.format ?? undefined,
     decisionId: r.decision_id ?? undefined,
+    draftId: r.draft_id ?? undefined,
     attempts: r.attempts,
   };
 }
@@ -92,7 +94,7 @@ export function previousRelease(db: DatabaseSync, project: string, beforeIso: st
 export function updateEvent(
   db: DatabaseSync,
   id: string,
-  patch: Partial<Pick<ChangeEvent, "status" | "reason" | "brief" | "format" | "version" | "decisionId">> & { incAttempts?: boolean },
+  patch: Partial<Pick<ChangeEvent, "status" | "reason" | "brief" | "format" | "version" | "decisionId" | "draftId">> & { incAttempts?: boolean },
 ): void {
   const sets: string[] = ["updated_at = ?"];
   const args: (string | number | null)[] = [now()];
@@ -106,6 +108,11 @@ export function updateEvent(
   if (patch.format !== undefined) put("format", patch.format);
   if (patch.version !== undefined) put("version", patch.version);
   if (patch.decisionId !== undefined) put("decision_id", patch.decisionId);
+  if (patch.draftId !== undefined) put("draft_id", patch.draftId);
   if (patch.incAttempts) sets.push("attempts = attempts + 1");
   db.prepare(`UPDATE events SET ${sets.join(", ")} WHERE id = ?`).run(...args, id);
+}
+
+export function eventsForDraft(db: DatabaseSync, draftId: string): ChangeEvent[] {
+  return db.prepare("SELECT * FROM events WHERE draft_id = ? ORDER BY merged_at").all(draftId).map(fromRow);
 }

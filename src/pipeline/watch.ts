@@ -52,7 +52,7 @@ export async function analyzeEvent(event: ChangeEvent, deps: PipelineDeps): Prom
   }
 }
 
-/** Events waiting for analysis: new ones, and failed ones that still have attempts left. */
+/** Events the pipeline can move on: new, briefed but undecided, and failed with attempts left. */
 export function pendingEvents(deps: PipelineDeps): ChangeEvent[] {
-  return eventsWithStatus(deps.db, deps.project.id, "new", "failed").filter((e) => e.status === "new" || e.attempts < MAX_ATTEMPTS);
+  return eventsWithStatus(deps.db, deps.project.id, "new", "briefed", "failed").filter((e) => e.status !== "failed" || e.attempts < MAX_ATTEMPTS);
 }

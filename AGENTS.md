@@ -12,7 +12,7 @@ skills/<name>/SKILL.md  generic skills (frontmatter: name, description); loaded 
 projects/_template/   committed example of a project folder
 projects/<id>/        GITIGNORED: everything particular to a tracked repo (language, voice, skills, examples)
 src/
-  cli.ts              entry point (opencm bot | run | pr | doctor | ask | resume)
+  cli.ts              entry point (opencm bot | run | pr | eval | doctor | ask | resume)
   core/
     config.ts         loads config/default.yaml + the project's `harness:` override, validated with zod
     models.ts         "<provider>:<model>" → AI SDK model (OpenRouter by default); cost reported by OpenRouter or from config pricing
@@ -29,6 +29,10 @@ src/
   tools/repo.ts       read-only repo tools for agents (repo_list, repo_read_file, repo_diff, repo_search, list_prs, get_pr)
   pipeline/           watch.ts: poll → prefilter → brief (analyst) → patch notes on a release
                       brief.ts: ChangeBrief schema (each change with file evidence); patch-notes.ts
+                      decide.ts: format via the decision model + guards (release → thread, daily cap → hold)
+                      draft.ts: writer → checks → critic, ≤2 rewrites; flow.ts: advance() one event, digest
+  checks/checks.ts    deterministic checks on drafts: weighted length, link policy, claims vs brief, banned terms, secrets
+  evals/run.ts        eval runner: core cases (evals/cases, e.g. prompt injection) + project cases; reports in data/
   channels/telegram/  bot.ts: grammY long polling, owner-only; chat.ts: one owner message → one chat run
   store/db.ts         SQLite (node:sqlite) in data/opencm.sqlite; events.ts: merged PRs and their status
 data/                 GITIGNORED: database, traces, clones, outputs

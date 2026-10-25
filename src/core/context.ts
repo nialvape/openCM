@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "./paths.js";
-import type { RoleConfig } from "./config.js";
+import type { HarnessConfig, RoleConfig } from "./config.js";
+import { discoverSkills, skillsIndex } from "./skills.js";
 
 /**
  * The system prompt is a fixed, ordered list of named sections. Same inputs → same text → same
@@ -47,6 +48,17 @@ export function loadSections(role: string, projectId: string | undefined, extra:
     lessons: fromProject("lessons.md"),
     ...extra,
   };
+}
+
+/** Harness version of every role for a project, as `runAgent` would compute it. */
+export function harnessVersions(projectId: string, harness: HarnessConfig): Record<string, string> {
+  const skills = discoverSkills(projectId);
+  const out: Record<string, string> = {};
+  for (const [role, rc] of Object.entries(harness.roles)) {
+    const sections = { ...loadSections(role, projectId), ...(rc.tools.includes("load_skill") ? { skills: skillsIndex(skills) } : {}) };
+    out[role] = assemblePrompt(sections, rc).harnessVersion;
+  }
+  return out;
 }
 
 export function assemblePrompt(bodies: Partial<Record<SectionName, string>>, rc: RoleConfig): AssembledPrompt {
