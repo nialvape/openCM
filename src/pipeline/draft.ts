@@ -58,6 +58,8 @@ export interface WriteOptions {
   instruction?: string;
   /** The previous version when revising. */
   previous?: Draft;
+  /** Corrections applied in earlier rounds, which a rewrite for new problems must not undo. */
+  applied?: string[];
   /** Extra context for the writer (it goes in the task, so the cached system prompt stays the same). */
   extra?: string;
   /** Show the writer approved examples from memory (default true; evals turn it off for a baseline). */
@@ -85,6 +87,7 @@ function writeTask(o: WriteOptions, deps: PipelineDeps, issues: string[]): strin
     o.previous ? `Previous version:\n${JSON.stringify(o.previous, null, 2)}` : "",
     o.instruction ? `The maintainer asked for this change: ${o.instruction}` : "",
     issues.length ? `Fix these problems:\n${issues.map((i) => `- ${i}`).join("\n")}` : "",
+    o.applied?.length ? `The previous version already applies these earlier corrections. Keep them all:\n${o.applied.map((i) => `- ${i}`).join("\n")}` : "",
     'Answer with only JSON: {"format": "...", "posts": [{"text": "...", "claims": ["..."]}], "linkReply": "optional"}',
     asUntrustedData("change briefs", JSON.stringify(o.briefs, null, 2)),
   ]
@@ -208,6 +211,7 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
   let { draft, issues } = await repairLocal(await write(o, deps, []), o, deps);
   let revisions = 0;
   let review: Critique | undefined;
+  const applied: string[] = [];
 
   while (true) {
     if (issues.length === 0) {
@@ -217,7 +221,9 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
       break;
     }
     const feedback = issues.length ? formatIssues(issues) : review!.fixes.length ? review!.fixes : ["The reviewer asked for a better version."];
-    ({ draft, issues } = await repairLocal(await write({ ...o, previous: draft }, deps, feedback), o, deps, feedback));
+    // Earlier rounds' corrections ride along: without them a rewrite for new problems undid old fixes.
+    ({ draft, issues } = await repairLocal(await write({ ...o, previous: draft, applied }, deps, feedback), o, deps, [...applied, ...feedback]));
+    applied.push(...feedback);
     review = undefined;
     revisions++;
   }

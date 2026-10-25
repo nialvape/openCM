@@ -133,6 +133,17 @@ describe("composeDraft", () => {
     expect(await tool.execute({ posts: ["corto"] })).toContain("All posts fit. Stop measuring");
   });
 
+  it("carries earlier rounds' corrections into later rewrites", async () => {
+    const revise = (fix: string) => JSON.stringify({ scores: { accuracy: 2, clarity: 4, hook: 4, voice: 4, value: 4, noHype: 5 }, verdict: "revise", fixes: [fix] });
+    const post = (t: string) => answer(draftJson({ posts: [{ text: t, claims: ["16:c1"] }] }));
+    const writer = mockModel(post("Ya podés usar la TUP."), post("Ya podés usar la TUP; con MFA no anda."), post("La TUP ya está; con MFA no anda."));
+    const critic = mockModel(answer(revise("decí que con MFA no anda")), answer(revise("abrí con la TUP")), answer(okCritique));
+    await composeDraft({ format: "post", briefs: [brief(16)] }, deps({}, { writer, critic }));
+    const second = JSON.stringify(writer.doGenerateCalls[2].prompt);
+    expect(second).toContain("abrí con la TUP");
+    expect(second).toMatch(/earlier corrections\. Keep them all:\\n- decí que con MFA no anda/);
+  });
+
   it("keeps the critic's corrections when shortening a rewrite, and shows the critic each length", async () => {
     const fix = "Accuracy: decí que con MFA el login todavía no se puede completar";
     const long = `Ya podés usar la TUP; con MFA el login todavía no se puede completar. ${"a".repeat(220)}`;
