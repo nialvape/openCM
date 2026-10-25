@@ -123,7 +123,7 @@ describe("composeDraft", () => {
     // 21 characters plus an emoji, which X counts as 2.
     expect(afterTool).toContain("post 1: 23/280, fits");
     expect(afterTool).toContain("All posts fit. Stop measuring");
-    expect(JSON.stringify(writer.doGenerateCalls[0].prompt)).toContain("Aim for at most 240 characters");
+    expect(JSON.stringify(writer.doGenerateCalls[0].prompt)).toContain("Each post at most 280 characters");
   });
 
   it("stops the writer from measuring in a loop", async () => {

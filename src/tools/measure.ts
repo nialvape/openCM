@@ -4,8 +4,6 @@ import type { AgentTool } from "../core/loop.js";
 
 /** X's hard limit, in weighted characters (emojis and CJK count 2, any URL 23). */
 export const X_LIMIT = 280;
-/** What writers aim for when writing: the margin absorbs later edits. Not a limit. */
-export const X_TARGET = 240;
 /** Measurements per writer answer. Past this the model was trimming letter by letter, not converging. */
 export const MAX_MEASUREMENTS = 3;
 

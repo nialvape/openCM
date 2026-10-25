@@ -12,4 +12,4 @@ Shape:
 
 Keep it as short as the content allows: three strong posts beat seven thin ones. Don't repeat the first post at the end.
 
-Length: aim for at most 240 characters per post (X cuts at 280). Check with measure_posts, never by counting yourself.
+Length: at most 280 characters per post, checked with measure_posts, never by counting yourself.

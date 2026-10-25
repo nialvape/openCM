@@ -2,7 +2,7 @@
 name: x-post
 description: How to write a single X post announcing one user-visible change.
 ---
-One post, one change, at most 280 characters (aim for 200: room to breathe).
+One post, one change, at most 280 characters.
 
 Shape:
 1. Lead with what the reader can do now, in their words, not the project's. "Ya podés…" / "You can now…" beats "We added…".
@@ -16,4 +16,4 @@ Don't:
 - Hashtags, unless the voice says so. Hype words ("revolutionary", "game changer", "🚀🚀"). Internal names (function names, file paths, PR jargon).
 - Links or domain names in the post when the project puts links in a reply.
 
-Length: aim for at most 240 characters per post (X cuts at 280). Check with measure_posts, never by counting yourself.
+Length: at most 280 characters per post, checked with measure_posts, never by counting yourself.

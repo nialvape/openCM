@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { runChecks, POSTS_PER_FORMAT, type CheckIssue } from "../checks/checks.js";
-import { measurePostsTool, X_TARGET } from "../tools/measure.js";
+import { measurePostsTool, X_LIMIT } from "../tools/measure.js";
 import { asUntrustedData } from "../core/policy.js";
 import { runAgentJson } from "../core/structured.js";
 import { now } from "../store/db.js";
@@ -79,7 +79,7 @@ function writeTask(o: WriteOptions, deps: PipelineDeps, issues: string[]): strin
           : "Don't put links or domain names in the posts. If readers need one, put it in linkReply (a reply under the last post).";
   return [
     `Write a ${o.format} for X about the changes in the briefs below (${min === max ? `${min} post` : `${min} to ${max} posts`}). Load the ${SKILL_FOR[o.format]} skill first.`,
-    `Language: ${deps.project.language}. Aim for at most ${X_TARGET} characters per post (about 35 to 40 words); X cuts at 280. Before answering, measure your posts with measure_posts and shorten any that are over. ${links}`,
+    `Language: ${deps.project.language}. Each post at most ${X_LIMIT} characters. Before answering, measure your posts with measure_posts and shorten any that are over. ${links}`,
     'Each post lists in "claims" the changes it states, as "<pr>:<change id>" (e.g. "16:c1"). Only state what the briefs support.',
     o.extra ?? "",
     o.previous ? `Previous version:\n${JSON.stringify(o.previous, null, 2)}` : "",
@@ -162,7 +162,7 @@ async function repairOne(draft: Draft, where: string, problems: CheckIssue[], o:
       `This ${where} of a ${draft.format} for X needs fixing:`,
       problems.map((p) => `- ${p.message}`).join("\n"),
       `Current text:\n${textAt(draft, where)}`,
-      `Write ${VARIANTS} alternative versions that fix it, keeping the meaning, the facts and the language (${deps.project.language}). Aim for at most ${X_TARGET} characters; measure them with measure_posts before answering.`,
+      `Write ${VARIANTS} alternative versions that fix it, keeping the meaning, the facts and the language (${deps.project.language}). Each at most ${X_LIMIT} characters; measure them with measure_posts before answering.`,
       'Answer with only JSON: {"variants": ["...", "..."]}',
       asUntrustedData("change briefs", JSON.stringify(o.briefs, null, 2)),
     ].join("\n\n"),
