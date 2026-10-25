@@ -15,7 +15,7 @@ src/
   cli.ts              entry point (opencm bot | run | pr | eval | doctor | ask | resume)
   core/
     config.ts         loads config/default.yaml + the project's `harness:` override, validated with zod
-    models.ts         "<provider>:<model>" → AI SDK model (OpenRouter by default); cost reported by OpenRouter or from config pricing
+    models.ts         "<provider>:<model>" → AI SDK model (Vercel AI Gateway, OpenRouter, direct APIs); cost from config pricing or as reported
     context.ts        system prompt from ordered, named, hashed sections; the hash is the harness version
     skills.ts         discovers core + project skills (project wins on name clash), renders the index
     policy.ts         tool allowlist per role, secret scrubbing, output limits, fencing of untrusted text

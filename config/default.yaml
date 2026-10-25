@@ -4,18 +4,19 @@
 # Every role also takes maxOutputTokens (default 4000) and stepTimeoutSec (default 180): caps per model call,
 # so a runaway generation stops early instead of running for minutes and costing dollars. And reasoning
 # (none | minimal | low | medium | high; default: the provider's) for how much the model may think.
-# Model ids are "<provider>:<model>". Providers: openrouter (default; ids are "<vendor>/<model>" from
-# https://openrouter.ai/models), anthropic, openai, google (direct APIs).
+# Model ids are "<provider>:<model>". Providers: gateway (Vercel AI Gateway, VERCEL_AI_GATEWAY_API_KEY; ids
+# "<vendor>/<model>" from https://ai-gateway.vercel.sh/v1/models), openrouter (ids from https://openrouter.ai/models),
+# anthropic, openai, google (direct APIs).
 # The critic uses a different model family than the writer on purpose (same-family judges favor their own output).
 roles:
   analyst:
-    model: openrouter:~z-ai/glm-latest
+    model: gateway:zai/glm-5.3
     tools: [repo_list, repo_read_file, repo_diff, repo_search, get_pr, load_skill]
     maxSteps: 25
     maxCostUsd: 0.50
     plan: false
   writer:
-    model: openrouter:~z-ai/glm-latest
+    model: gateway:zai/glm-5.3
     tools: [load_skill, measure_posts]
     maxSteps: 10
     maxCostUsd: 0.20
@@ -23,34 +24,34 @@ roles:
     maxOutputTokens: 3000
     reasoning: low
   critic:
-    model: openrouter:anthropic/claude-sonnet-5.5
+    model: gateway:anthropic/claude-sonnet-5.5
     tools: []
     maxSteps: 1
     maxCostUsd: 0.10
     plan: false
     maxOutputTokens: 2000
   chat:
-    model: openrouter:z-ai/glm-5.3-flash
+    model: gateway:zai/glm-5.3-flash
     tools: [repo_list, repo_read_file, repo_search, get_pr, list_prs, load_skill, send_message]
     maxSteps: 15
     maxCostUsd: 0.30
     plan: false
   compactor:
-    model: openrouter:z-ai/glm-5.3-flash
+    model: gateway:zai/glm-5.3-flash
     tools: []
     maxSteps: 1
     maxCostUsd: 0.05
     plan: false
   # Proposes lessons from the owner's edits and rejections; the reviewer (another model family) checks them.
   reflect:
-    model: openrouter:~z-ai/glm-latest
+    model: gateway:zai/glm-5.3
     tools: []
     maxSteps: 1
     maxCostUsd: 0.10
     plan: false
     maxOutputTokens: 3000
   reviewer:
-    model: openrouter:anthropic/claude-sonnet-5.5
+    model: gateway:anthropic/claude-sonnet-5.5
     tools: []
     maxSteps: 1
     maxCostUsd: 0.10
@@ -60,10 +61,13 @@ roles:
 # Largest tool result (in characters) put in context; longer outputs are cut with a note on how to page.
 maxToolOutputChars: 12000
 
-# USD per million tokens. Optional with OpenRouter, which reports the real cost of each call; an entry
-# here overrides that, and is needed for direct providers. Without either, only the step budget applies.
-pricing: {}
-#  anthropic:claude-sonnet-5-5: { input: <usd>, output: <usd>, cacheRead: <usd> }
+# USD per million tokens, for cost metering and budgets. OpenRouter reports the real cost of each call; the
+# gateway records it asynchronously, so its models are priced here. Source: https://ai-gateway.vercel.sh/v1/models
+# (read 2026-10-25; some models vary slightly by upstream provider). Without a price, only the step budget applies.
+pricing:
+  gateway:zai/glm-5.3: { input: 1.2, output: 4.0, cacheRead: 0.2 }
+  gateway:zai/glm-5.3-flash: { input: 0.15, output: 0.5, cacheRead: 0.03 }
+  gateway:anthropic/claude-sonnet-5.5: { input: 2.0, output: 10.0, cacheRead: 0.1 }
 
 # Decision models answer typed questions with a probability per option instead of generating text.
 # They're served through OpenRouter's Decisions API (e.g. cloudflare/clef, cloudflare/clef-flash,

@@ -66,6 +66,8 @@ describe("models", () => {
     expect(modelFamily("google:gemini-pro-latest")).toBe("google");
     expect(modelFamily("openrouter:anthropic/claude-sonnet-5.5")).toBe("anthropic");
     expect(modelFamily("openrouter:google/gemini-4-argon")).toBe("google");
+    expect(modelFamily("gateway:zai/glm-5.3")).toBe("zai");
+    expect(modelFamily("gateway:anthropic/claude-sonnet-5.5")).toBe("anthropic");
   });
 
   it("falls back to the cost OpenRouter reports when config has no price", () => {
@@ -73,6 +75,7 @@ describe("models", () => {
     const usage = { inputTokens: 10, outputTokens: 10 } as any;
     expect(costUsd(config, "openrouter:x/y", usage, { openrouter: { usage: { cost: 0.0042 } } })).toBe(0.0042);
     expect(costUsd(config, "openrouter:x/y", usage, {})).toBeUndefined();
+    expect(costUsd(config, "gateway:x/y", usage, { gateway: { cost: 0.001 } })).toBe(0.001);
   });
 });
 

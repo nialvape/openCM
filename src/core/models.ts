@@ -1,12 +1,23 @@
-import type { Experimental_DecisionModel, LanguageModel, LanguageModelUsage, ProviderMetadata } from "ai";
+import { createGateway, type Experimental_DecisionModel, type LanguageModel, type LanguageModelUsage, type ProviderMetadata } from "ai";
+
+type GatewayProvider = ReturnType<typeof createGateway>;
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 import { openrouter } from "@openrouter/ai-sdk-provider";
 import { ConfigError, type HarnessConfig } from "./config.js";
 
+let gatewayProvider: GatewayProvider | undefined;
+/** Created on first use: the key comes from .env, which the CLI loads after this module is imported. */
+function vercelGateway(): GatewayProvider {
+  gatewayProvider ??= createGateway({ apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY ?? process.env.AI_GATEWAY_API_KEY });
+  return gatewayProvider;
+}
+
 /** Providers are looked up by the prefix of "<provider>:<model>". Adding one is one line here. */
 const providers: Record<string, (modelId: string) => LanguageModel> = {
+  // Vercel AI Gateway ids are "<vendor>/<model>" too, e.g. gateway:zai/glm-5.3.
+  gateway: (id) => vercelGateway()(id),
   // OpenRouter ids are "<vendor>/<model>", e.g. openrouter:anthropic/claude-sonnet-5.5.
   // Usage accounting makes OpenRouter report the real cost of each call.
   openrouter: (id) => openrouter(id, { usage: { include: true } }),
@@ -93,6 +104,9 @@ export function costUsd(config: HarnessConfig, ref: string, usage: LanguageModel
 }
 
 function reportedCost(metadata?: ProviderMetadata): number | undefined {
+  // The gateway records cost asynchronously; use it when it does come inline, else config pricing applies.
+  const gatewayCost = (metadata?.gateway as Record<string, unknown> | undefined)?.cost;
+  if (typeof gatewayCost === "number") return gatewayCost;
   const usage = metadata?.openrouter?.usage;
   if (typeof usage !== "object" || usage === null || Array.isArray(usage)) return undefined;
   const cost = (usage as Record<string, unknown>).cost;
