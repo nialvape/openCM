@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { runChecks, POSTS_PER_FORMAT, type CheckIssue } from "../checks/checks.js";
-import { measurePostsTool, X_LIMIT } from "../tools/measure.js";
+import { measure, measurePostsTool, X_LIMIT } from "../tools/measure.js";
 import { asUntrustedData } from "../core/policy.js";
 import { runAgentJson } from "../core/structured.js";
 import { now } from "../store/db.js";
@@ -115,6 +115,8 @@ async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps)
     task: [
       `Review this ${draft.format} draft against the change briefs.`,
       `Draft:\n${JSON.stringify(draft, null, 2)}`,
+      // The critic can't count either; without this it asked to add text to posts that were full.
+      `Length of each post as X counts it (limit ${X_LIMIT}):\n${measure(draft.posts.map((p) => p.text)).map((m) => `post ${m.post}: ${m.length}/${X_LIMIT}`).join("\n")}`,
       asUntrustedData("change briefs", JSON.stringify(briefs, null, 2)),
     ].join("\n\n"),
     harness: deps.harness,
@@ -154,7 +156,7 @@ function withText(draft: Draft, where: string, text: string): Draft {
 const textAt = (draft: Draft, where: string) => (where === "link reply" ? (draft.linkReply ?? "") : draft.posts[Number(where.slice("post ".length)) - 1].text);
 
 /** Asks for a few rewrites of one post and keeps the first that passes the checks for that post. */
-async function repairOne(draft: Draft, where: string, problems: CheckIssue[], o: WriteOptions, deps: PipelineDeps): Promise<Draft> {
+async function repairOne(draft: Draft, where: string, problems: CheckIssue[], o: WriteOptions, deps: PipelineDeps, keep: string[]): Promise<Draft> {
   const { value } = await runAgentJson(VariantsSchema, {
     role: "writer",
     projectId: deps.project.id,
@@ -162,6 +164,8 @@ async function repairOne(draft: Draft, where: string, problems: CheckIssue[], o:
       `This ${where} of a ${draft.format} for X needs fixing:`,
       problems.map((p) => `- ${p.message}`).join("\n"),
       `Current text:\n${textAt(draft, where)}`,
+      // Without these, shortening undid the corrections the rewrite had just applied.
+      keep.length ? `This text applies these corrections. Every version must still respect all of them:\n${keep.map((k) => `- ${k}`).join("\n")}` : "",
       `Write ${VARIANTS} alternative versions that fix it, keeping the meaning, the facts and the language (${deps.project.language}). Each at most ${X_LIMIT} characters; measure them with measure_posts before answering.`,
       'Answer with only JSON: {"variants": ["...", "..."]}',
       asUntrustedData("change briefs", JSON.stringify(o.briefs, null, 2)),
@@ -183,11 +187,11 @@ async function repairOne(draft: Draft, where: string, problems: CheckIssue[], o:
  * Fixes problems local to single posts (too long, a link, a banned term) with one short call per
  * failing post, before falling back to rewriting the whole draft. Returns the draft and its checks.
  */
-async function repairLocal(draft: Draft, o: WriteOptions, deps: PipelineDeps): Promise<{ draft: Draft; issues: CheckIssue[] }> {
+async function repairLocal(draft: Draft, o: WriteOptions, deps: PipelineDeps, keep: string[] = []): Promise<{ draft: Draft; issues: CheckIssue[] }> {
   let issues = runChecks(draft, o.briefs, deps.project);
   for (let round = 0; round < REPAIR_ROUNDS && issues.length > 0 && issues.every(isLocal); round++) {
     for (const where of [...new Set(issues.map((i) => i.where))]) {
-      draft = await repairOne(draft, where, issues.filter((i) => i.where === where), o, deps);
+      draft = await repairOne(draft, where, issues.filter((i) => i.where === where), o, deps, keep);
     }
     issues = runChecks(draft, o.briefs, deps.project);
   }
@@ -213,7 +217,7 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
       break;
     }
     const feedback = issues.length ? formatIssues(issues) : review!.fixes.length ? review!.fixes : ["The reviewer asked for a better version."];
-    ({ draft, issues } = await repairLocal(await write({ ...o, previous: draft }, deps, feedback), o, deps));
+    ({ draft, issues } = await repairLocal(await write({ ...o, previous: draft }, deps, feedback), o, deps, feedback));
     review = undefined;
     revisions++;
   }

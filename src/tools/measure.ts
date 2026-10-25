@@ -4,8 +4,6 @@ import type { AgentTool } from "../core/loop.js";
 
 /** X's hard limit, in weighted characters (emojis and CJK count 2, any URL 23). */
 export const X_LIMIT = 280;
-/** Measurements per writer answer. Past this the model was trimming letter by letter, not converging. */
-export const MAX_MEASUREMENTS = 3;
 
 export interface Measurement {
   post: number;
@@ -37,19 +35,16 @@ export function describeMeasurements(ms: Measurement[]): string {
 /**
  * Character counting as a tool. Models count characters badly (they see tokens), and reasoning
  * models given room count by hand in their thinking until they run out; this gives them X's exact
- * count instead. Measurements are capped per run, so it can't become a trimming loop either.
+ * count instead. It's never cut off while a post is over: that made the writer hand in a post that
+ * was too long, and the shortening done afterwards lost the corrections it had just applied. The
+ * role's step budget bounds the calls, and "all posts fit" tells it to stop.
  */
-export function measurePostsTool(maxCalls = MAX_MEASUREMENTS): AgentTool<{ posts: string[] }> {
-  let calls = 0;
+export function measurePostsTool(): AgentTool<{ posts: string[] }> {
   return {
-    description: `Measures posts exactly as X counts them (emojis count 2, any link or domain name 23) and says which ones are over ${X_LIMIT}. The only valid way to know a post's length. Use it at most ${maxCalls} times.`,
+    description: `Measures posts exactly as X counts them (emojis count 2, any link or domain name 23) and says which ones are over ${X_LIMIT}. The only valid way to know a post's length.`,
     inputSchema: z.object({
       posts: z.array(z.string()).min(1).describe('The post texts in order, e.g. ["Ya podés…", "Para probarlo…"]'),
     }),
-    execute: async ({ posts }) => {
-      calls++;
-      if (calls > maxCalls) return `You already measured ${maxCalls} times. Give your answer now; anything still too long will be fixed afterwards.`;
-      return describeMeasurements(measure(posts));
-    },
+    execute: async ({ posts }) => describeMeasurements(measure(posts)),
   };
 }

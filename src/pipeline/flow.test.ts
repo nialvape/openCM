@@ -127,11 +127,28 @@ describe("composeDraft", () => {
     expect(JSON.stringify(writer.doGenerateCalls[0].prompt)).toContain("Each post at most 280 characters");
   });
 
-  it("stops the writer from measuring in a loop", async () => {
-    const tool = measurePostsTool(2);
-    expect(await tool.execute({ posts: ["a".repeat(300)] })).toContain("OVER by 20");
-    expect(await tool.execute({ posts: ["corto"] })).toContain("All posts fit");
-    expect(await tool.execute({ posts: ["corto"] })).toContain("Give your answer now");
+  it("keeps measuring while a post is over, and says to stop once all fit", async () => {
+    const tool = measurePostsTool();
+    for (let i = 0; i < 4; i++) expect(await tool.execute({ posts: ["a".repeat(300)] })).toContain("OVER by 20");
+    expect(await tool.execute({ posts: ["corto"] })).toContain("All posts fit. Stop measuring");
+  });
+
+  it("keeps the critic's corrections when shortening a rewrite, and shows the critic each length", async () => {
+    const fix = "Accuracy: decí que con MFA el login todavía no se puede completar";
+    const long = `Ya podés usar la TUP; con MFA el login todavía no se puede completar. ${"a".repeat(220)}`;
+    const writer = mockModel(
+      answer(draftJson({ posts: [{ text: "Ya podés usar la TUP.", claims: ["16:c1"] }] })),
+      answer(draftJson({ posts: [{ text: long, claims: ["16:c1"] }] })),
+      answer(JSON.stringify({ variants: ["Ya podés usar la TUP; con MFA todavía no se puede completar el login."] })),
+    );
+    const notOk = JSON.stringify({ scores: { accuracy: 2, clarity: 4, hook: 4, voice: 4, value: 4, noHype: 5 }, verdict: "revise", fixes: [fix] });
+    const critic = mockModel(answer(notOk), answer(okCritique));
+    await composeDraft({ format: "post", briefs: [brief(16)] }, deps({}, { writer, critic }));
+
+    const repairPrompt = JSON.stringify(writer.doGenerateCalls[2].prompt);
+    expect(repairPrompt).toContain("of 280 weighted characters");
+    expect(repairPrompt).toContain(fix);
+    expect(JSON.stringify(critic.doGenerateCalls[0].prompt)).toContain("post 1: 21/280");
   });
 
   it("retries without reasoning when a call runs out of output while thinking", async () => {
