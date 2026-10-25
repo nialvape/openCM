@@ -55,6 +55,12 @@ export function discoverSkills(projectId?: string, roots: { core: string; projec
   return skills;
 }
 
+/** Every skill as name + body, in a stable order: what the harness version hashes. */
+export function skillBodies(skills: Map<string, Skill>): string[] {
+  return [...skills.values()].sort((a, b) => a.name.localeCompare(b.name)).map((s) => `${s.name}
+${s.body}`);
+}
+
 /** The only part of the skills that is always in context: one line per skill. Bodies load on demand. */
 export function skillsIndex(skills: Map<string, Skill>): string | undefined {
   if (skills.size === 0) return undefined;

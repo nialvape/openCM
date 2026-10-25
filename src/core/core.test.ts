@@ -38,6 +38,13 @@ describe("context", () => {
     expect(assemblePrompt({ base: "B" }, { ...rc, maxSteps: 4 }).harnessVersion).not.toBe(v1);
   });
 
+  it("changes the harness version when a skill's body changes, not only its description", () => {
+    const v1 = assemblePrompt({ base: "B", skills: "- x-post: posts" }, rc, ["x-post\nAim for 240"]).harnessVersion;
+    const v2 = assemblePrompt({ base: "B", skills: "- x-post: posts" }, rc, ["x-post\nAt most 280"]).harnessVersion;
+    expect(v2).not.toBe(v1);
+    expect(assemblePrompt({ base: "B" }, rc).harnessVersion).toBe(assemblePrompt({ base: "B" }, rc, []).harnessVersion);
+  });
+
   it("skips empty sections", () => {
     expect(assemblePrompt({ base: "B", lessons: "  " }, rc).sections.map((s) => s.name)).toEqual(["base"]);
   });

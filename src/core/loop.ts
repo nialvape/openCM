@@ -6,7 +6,7 @@ import { roleConfig, type HarnessConfig, type ReasoningEffort } from "./config.j
 import { assemblePrompt, loadSections, type SectionName } from "./context.js";
 import { costUsd, resolveModel } from "./models.js";
 import { allowedTools, limitOutput, scrubSecrets } from "./policy.js";
-import { discoverSkills, skillsIndex, type Skill } from "./skills.js";
+import { discoverSkills, skillBodies, skillsIndex, type Skill } from "./skills.js";
 import { Trace, type RunStatus } from "./trace.js";
 import { db as sharedDb, now } from "../store/db.js";
 
@@ -68,6 +68,7 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
   const prompt = assemblePrompt(
     { ...loadSections(opts.role, opts.projectId), ...(wantsSkills ? { skills: skillsIndex(skills) } : {}), ...opts.sections },
     rc,
+    wantsSkills ? skillBodies(skills) : [],
   );
 
   let runId: string;

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "./paths.js";
 import type { HarnessConfig, RoleConfig } from "./config.js";
-import { discoverSkills, skillsIndex } from "./skills.js";
+import { discoverSkills, skillBodies, skillsIndex } from "./skills.js";
 
 /**
  * The system prompt is a fixed, ordered list of named sections. Same inputs → same text → same
@@ -56,18 +56,24 @@ export function harnessVersions(projectId: string, harness: HarnessConfig): Reco
   const out: Record<string, string> = {};
   for (const [role, rc] of Object.entries(harness.roles)) {
     const sections = { ...loadSections(role, projectId), ...(rc.tools.includes("load_skill") ? { skills: skillsIndex(skills) } : {}) };
-    out[role] = assemblePrompt(sections, rc).harnessVersion;
+    out[role] = assemblePrompt(sections, rc, rc.tools.includes("load_skill") ? skillBodies(skills) : []).harnessVersion;
   }
   return out;
 }
 
-export function assemblePrompt(bodies: Partial<Record<SectionName, string>>, rc: RoleConfig): AssembledPrompt {
+/**
+ * `loadable` is content the role can pull in during the run (skill bodies): not in the prompt, but
+ * part of the harness, so changing a skill changes the version just like changing a prompt.
+ */
+export function assemblePrompt(bodies: Partial<Record<SectionName, string>>, rc: RoleConfig, loadable: string[] = []): AssembledPrompt {
   const sections: Section[] = [];
   for (const name of SECTION_ORDER) {
     const text = bodies[name]?.trim();
     if (text) sections.push({ name, text, hash: sha(text) });
   }
   const instructions = sections.map((s) => `<${s.name}>\n${s.text}\n</${s.name}>`).join("\n\n");
-  const harnessVersion = sha(JSON.stringify({ sections: sections.map((s) => [s.name, s.hash]), rc }));
+  const version: Record<string, unknown> = { sections: sections.map((s) => [s.name, s.hash]), rc };
+  if (loadable.length) version.loadable = sha(loadable.join("\n"));
+  const harnessVersion = sha(JSON.stringify(version));
   return { instructions, sections, harnessVersion };
 }

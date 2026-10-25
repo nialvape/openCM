@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "./core/paths.js";
 import { ConfigError, loadHarnessConfig, loadProjectConfig, roleConfig } from "./core/config.js";
-import { assemblePrompt, loadSections } from "./core/context.js";
+import { assemblePrompt, harnessVersions, loadSections } from "./core/context.js";
 import { loadDecisionSchema, thresholdFor } from "./core/decision.js";
 import { runAgent } from "./core/loop.js";
 import { startBot } from "./channels/telegram/bot.js";
@@ -141,7 +141,9 @@ async function evals(projectId: string, args: string[]): Promise<number> {
   line("cost", `$${s.costUsd}`, ps && `$${ps.costUsd}`);
   if (previous) {
     const changed = Object.keys(r.harness).filter((role) => previous.harness[role] !== r.harness[role]);
-    console.log(changed.length ? `\nHarness changed since the last eval for: ${changed.join(", ")}` : "\nSame harness as the last eval.");
+    console.log(changed.length ? `\nHarness changed since the last eval for: ${changed.join(", ")}` : "\nSame prompts, skills and config as the last eval.");
+    const code = (c?: { commit: string; dirty: boolean }) => (c ? `${c.commit}${c.dirty ? " + uncommitted changes" : ""}` : "unknown");
+    if (code(previous.code) !== code(r.code)) console.log(`Code: ${code(previous.code)} → ${code(r.code)}`);
   }
   console.log(`Report: ${file}`);
   return s.avoidViolations > 0 || s.failures > 0 ? 1 : 0;
@@ -167,12 +169,13 @@ function doctor(projectId: string): number {
   const skills = discoverSkills(projectId);
   console.log(`project ${project.id}: ${project.repo}@${project.branch}, language ${project.language}`);
   console.log(`skills: ${skills.size ? [...skills.values()].map((s) => `${s.name} (${s.source})`).join(", ") : "none"}`);
+  const versions = harnessVersions(projectId, harness);
   for (const role of Object.keys(harness.roles)) {
     const rc = roleConfig(harness, role);
     const sections = { ...loadSections(role, projectId), skills: rc.tools.includes("load_skill") ? skillsIndex(skills) : undefined };
     const prompt = assemblePrompt(sections, rc);
     const names = prompt.sections.map((s) => s.name).join(", ") || "none";
-    console.log(`role ${role}: ${rc.model}, harness ${prompt.harnessVersion}, sections [${names}], tools [${rc.tools.join(", ")}]`);
+    console.log(`role ${role}: ${rc.model}, harness ${versions[role]}, sections [${names}], tools [${rc.tools.join(", ")}]`);
   }
   const formatSchema = loadDecisionSchema("content-format", projectId);
   const questions = Object.keys(formatSchema.questions)

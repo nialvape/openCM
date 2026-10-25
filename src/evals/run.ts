@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -58,6 +59,8 @@ export interface EvalReport {
   project: string;
   at: string;
   harness: Record<string, string>;
+  /** Code the pipeline ran with: task texts and logic live in code, so they matter as much as prompts. */
+  code?: { commit: string; dirty: boolean };
   models: Record<string, string>;
   decisionModel: string;
   /** False for a no-memory baseline run (--no-memory). */
@@ -181,6 +184,16 @@ export function summarize(cases: CaseResult[]): EvalReport["summary"] {
   };
 }
 
+/** Current git commit and whether src/, prompts/, skills/, decisions/ or config/ have uncommitted changes. */
+export function codeVersion(): EvalReport["code"] {
+  try {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: paths.root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return { commit: git("rev-parse", "--short", "HEAD"), dirty: git("status", "--porcelain", "--", "src", "prompts", "skills", "decisions", "config") !== "" };
+  } catch {
+    return undefined;
+  }
+}
+
 /** `--model writer=openrouter:x/y` overrides, applied on top of the project's harness config. */
 export function withOverrides(harness: HarnessConfig, overrides: Record<string, string>): HarnessConfig {
   const patch: Record<string, unknown> = { roles: {} };
@@ -215,6 +228,7 @@ export async function runEvals(
     project: project.id,
     at: new Date().toISOString(),
     harness: harnessVersions(project.id, harness),
+    code: codeVersion(),
     models: Object.fromEntries(Object.entries(harness.roles).map(([r, rc]) => [r, rc.model])),
     decisionModel: harness.decisions.model,
     memory,
