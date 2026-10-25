@@ -39,6 +39,21 @@ roles:
     maxSteps: 1
     maxCostUsd: 0.05
     plan: false
+  # Proposes lessons from the owner's edits and rejections; the reviewer (another model family) checks them.
+  reflect:
+    model: openrouter:~z-ai/glm-latest
+    tools: []
+    maxSteps: 1
+    maxCostUsd: 0.10
+    plan: false
+    maxOutputTokens: 3000
+  reviewer:
+    model: openrouter:anthropic/claude-sonnet-5.5
+    tools: []
+    maxSteps: 1
+    maxCostUsd: 0.10
+    plan: false
+    maxOutputTokens: 2000
 
 # Largest tool result (in characters) put in context; longer outputs are cut with a note on how to page.
 maxToolOutputChars: 12000
@@ -71,3 +86,11 @@ x:
   prices: { post: 0.015, postWithLink: 0.2, read: 0.005 }
   maxSpendPerDayUsd: 1.0
   metricsAfterHours: [24, 168]
+
+# What the agent learns. Approved posts become examples for the writer; each draft records which
+# examples it used, and approvals, edits, rejections and engagement credit them. The lowest-scored
+# are evicted past maxExamples. Lessons come from the reflect job and need the owner's approval.
+memory:
+  examplesPerDraft: 3
+  maxExamples: 30
+  reflectAfter: 3

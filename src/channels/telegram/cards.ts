@@ -2,13 +2,17 @@ import { InlineKeyboard } from "grammy";
 import { renderDraft, weightedScore } from "../../pipeline/draft.js";
 import type { FormatDecision } from "../../pipeline/decide.js";
 import { FORMATS, type Format } from "../../pipeline/decide.js";
+import type { LessonProposal } from "../../pipeline/reflect.js";
 import type { StoredDraft } from "../../pipeline/review.js";
 import type { ChangeEvent } from "../../store/events.js";
 
 /** Actions on a draft card. Callback data stays under Telegram's 64-byte limit: "d:<uuid>:<action>". */
 export type DraftAction = "approve" | "edit" | "reject" | "publish" | `to_${Format}`;
 
-export type Callback = { kind: "draft"; draftId: string; action: DraftAction } | { kind: "format"; eventId: string; format: Format };
+export type Callback =
+  | { kind: "draft"; draftId: string; action: DraftAction }
+  | { kind: "format"; eventId: string; format: Format }
+  | { kind: "lesson"; lessonId: number; accept: boolean };
 
 export function parseCallback(data: string): Callback | undefined {
   const [prefix, ...rest] = data.split(":");
@@ -17,6 +21,7 @@ export function parseCallback(data: string): Callback | undefined {
   if (!ref || !tail) return undefined;
   if (prefix === "d" && (["approve", "edit", "reject", "publish"].includes(tail) || FORMATS.some((f) => tail === `to_${f}`))) return { kind: "draft", draftId: ref, action: tail as DraftAction };
   if (prefix === "f" && (FORMATS as string[]).includes(tail)) return { kind: "format", eventId: ref, format: tail as Format };
+  if (prefix === "l" && /^\d+$/.test(ref) && (tail === "accept" || tail === "discard")) return { kind: "lesson", lessonId: Number(ref), accept: tail === "accept" };
   return undefined;
 }
 
@@ -55,4 +60,9 @@ export const EDIT_HELP = "Send an instruction to rewrite it (e.g. \"más corto, 
 /** Shown when publishing failed after approval; publishing again skips the parts already posted. */
 export function retryPublishKeyboard(draftId: string): InlineKeyboard {
   return new InlineKeyboard().text("🔁 Retry publishing", `d:${draftId}:publish`);
+}
+
+export function lessonCard(p: LessonProposal): { text: string; keyboard: InlineKeyboard } {
+  const text = `💡 Proposed lesson, from your corrections:\n\n${p.text}\n\nWhy: ${p.reason}\nReviewer: ${p.review}\nBased on ${p.evidence.length} case(s).\n\nIf you accept it, it's added to lessons.md and every role reads it from now on.`;
+  return { text, keyboard: new InlineKeyboard().text("✅ Add lesson", `l:${p.id}:accept`).text("✖️ Discard", `l:${p.id}:discard`) };
 }

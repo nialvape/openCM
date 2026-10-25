@@ -38,6 +38,10 @@ src/
   channels/x/         oauth1.ts: OAuth 1.0a signing; client.ts: create post, read public metrics
   pipeline/publish.ts publishes an approved draft as a reply chain (dry run unless DRY_RUN=0), daily spend cap,
                       resumable; collects engagement at x.metricsAfterHours
+  pipeline/memory.ts  approved posts become writer examples; each draft records the examples it used, and
+                      approvals, edits, rejections and engagement credit them; lowest-scored evicted
+  pipeline/reflect.ts reflect role proposes lessons from the owner's corrections, reviewer (other family)
+                      filters them, the owner accepts; code appends accepted ones to projects/<id>/lessons.md
   pipeline/review.ts  what the owner's buttons do: approve, reject, edit (verbatim or instruction), change format;
                       every choice is stored as a label for the decision model
   store/db.ts         SQLite (node:sqlite) in data/opencm.sqlite; events.ts: merged PRs and their status

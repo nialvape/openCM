@@ -41,6 +41,15 @@ const XConfigSchema = z.object({
   metricsAfterHours: z.array(z.number().positive()),
 });
 
+const MemoryConfigSchema = z.object({
+  /** Approved examples shown to the writer per draft, best first. */
+  examplesPerDraft: z.number().int().nonnegative(),
+  /** Examples kept per project; past this the lowest-scored are evicted. */
+  maxExamples: z.number().int().positive(),
+  /** Edited or rejected drafts that trigger the reflect job. */
+  reflectAfter: z.number().int().positive(),
+});
+
 export const HarnessConfigSchema = z.object({
   roles: z.record(z.string(), RoleConfigSchema),
   maxToolOutputChars: z.number().int().positive(),
@@ -48,6 +57,7 @@ export const HarnessConfigSchema = z.object({
   decisions: DecisionsConfigSchema,
   chat: ChatConfigSchema,
   x: XConfigSchema,
+  memory: MemoryConfigSchema,
 });
 
 export const ProjectConfigSchema = z.object({

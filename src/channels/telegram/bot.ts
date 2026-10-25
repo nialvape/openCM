@@ -14,11 +14,13 @@ import {
   replaceDraftText,
   reviseDraft,
 } from "../../pipeline/review.js";
+import { creditFromMetrics } from "../../pipeline/memory.js";
 import { collectMetrics, publishDraft } from "../../pipeline/publish.js";
+import { decideLesson, pendingLessons, reflect, type LessonProposal } from "../../pipeline/reflect.js";
 import { pendingEvents, poll } from "../../pipeline/watch.js";
 import type { PipelineDeps } from "../../pipeline/types.js";
 import { eventsForDraft, eventsWithStatus } from "../../store/events.js";
-import { draftCard, EDIT_HELP, formatQuestion, parseCallback, retryPublishKeyboard } from "./cards.js";
+import { draftCard, EDIT_HELP, formatQuestion, lessonCard, parseCallback, retryPublishKeyboard } from "./cards.js";
 import { handleOwnerMessage, resetSession, statusSummary } from "./chat.js";
 
 /** Telegram's limit per message is 4096 characters; leave room. */
@@ -60,6 +62,7 @@ const HELP = `I'm the community manager agent for this project. I watch the repo
 /run  check GitHub for merged PRs now
 /drafts  show drafts and questions waiting for you
 /digest  draft a digest of the held changes now
+/reflect  propose lessons from your recent corrections
 /status  runs and spend
 /new  start a fresh conversation (forgets this chat's context)
 /help  this message`;
@@ -124,6 +127,13 @@ export async function startBot(projectId: string): Promise<void> {
     }
   }
 
+  async function sendLessons(lessons: LessonProposal[]): Promise<void> {
+    for (const l of lessons) {
+      const card = lessonCard(l);
+      await send(card.text, card.keyboard);
+    }
+  }
+
   let running = false;
   /** One watch pass. Returns how many events it moved; overlapping passes are skipped. */
   async function cycle(): Promise<number> {
@@ -141,6 +151,14 @@ export async function startBot(projectId: string): Promise<void> {
         return 0;
       });
       if (read) console.log(`read metrics for ${read} post(s)`);
+      for (const hours of harness.x.metricsAfterHours) creditFromMetrics(deps, hours);
+      // Learning problems must not look like (or block) a watch failure.
+      await sendLessons(
+        await reflect(deps).catch((e) => {
+          console.error(`reflect error: ${errorText(e)}`);
+          return [];
+        }),
+      );
       return events.length;
     } catch (e) {
       console.error(`watch error: ${errorText(e)}`);
@@ -175,6 +193,13 @@ export async function startBot(projectId: string): Promise<void> {
     const o = await maybeDigest(deps, true);
     if (o) await deliver(o);
   });
+  bot.command("reflect", async (ctx) => {
+    await ctx.reply("Looking at your recent corrections…");
+    const lessons = await reflect(deps, true);
+    const waiting = pendingLessons(deps).filter((p) => !lessons.some((l) => l.id === p.id));
+    if (!lessons.length && !waiting.length) return void (await ctx.reply("No new lessons: either no corrections since the last time, or nothing the reviewer would keep."));
+    await sendLessons([...waiting, ...lessons]);
+  });
   bot.command("drafts", async (ctx) => {
     const drafts = pendingDrafts(deps);
     const questions = eventsWithStatus(deps.db, project.id, "awaiting_format");
@@ -200,6 +225,12 @@ export async function startBot(projectId: string): Promise<void> {
         await ctx.answerCallbackQuery({ text: `${cb.format}: working on it` });
         await ctx.editMessageReplyMarkup().catch(() => {});
         await deliver(await answerFormat(deps, cb.eventId, cb.format));
+        return;
+      }
+      if (cb.kind === "lesson") {
+        await ctx.answerCallbackQuery();
+        const lesson = decideLesson(deps, cb.lessonId, cb.accept);
+        await done(cb.accept ? `✅ Added to lessons.md: ${lesson.text}` : "✖️ Discarded.");
         return;
       }
       switch (cb.action) {
@@ -287,6 +318,7 @@ export async function startBot(projectId: string): Promise<void> {
     { command: "run", description: "Check GitHub for merged PRs now" },
     { command: "drafts", description: "Drafts and questions waiting for you" },
     { command: "digest", description: "Draft a digest of held changes" },
+    { command: "reflect", description: "Propose lessons from your corrections" },
     { command: "status", description: "Runs and spend" },
     { command: "new", description: "Start a fresh conversation" },
     { command: "help", description: "What I can do" },

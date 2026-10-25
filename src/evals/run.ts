@@ -60,6 +60,8 @@ export interface EvalReport {
   harness: Record<string, string>;
   models: Record<string, string>;
   decisionModel: string;
+  /** False for a no-memory baseline run (--no-memory). */
+  memory: boolean;
   cases: CaseResult[];
   summary: { formatAccuracy?: number; checkPassRate?: number; meanCriticScore?: number; mentionRate?: number; avoidViolations: number; failures: number; costUsd: number };
 }
@@ -106,8 +108,17 @@ function ownerLabel(projectId: string, pr: number): string | undefined {
 
 const contentOf = (o: Outcome) => (o.kind === "drafted" ? renderDraft(o.draft.draft) : "");
 
-async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig): Promise<CaseResult> {
+/** Copies the project's learned examples into the eval database, so evals measure the agent as it is now. */
+function copyMemory(projectId: string, db: ReturnType<typeof openDb>): void {
+  const rows = sharedDb().prepare("SELECT kind, format, text, score, uses, created_at FROM memory_items WHERE project = ? AND active = 1").all(projectId) as any[];
+  for (const r of rows) {
+    db.prepare("INSERT INTO memory_items (project, kind, format, text, score, uses, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(projectId, r.kind, r.format, r.text, r.score, r.uses, r.created_at, r.created_at);
+  }
+}
+
+async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig, memory: boolean): Promise<CaseResult> {
   const db = openDb(":memory:");
+  if (memory) copyMemory(project.id, db);
   const gh = c.fixture ? fixtureGitHub(project.repo, c.fixture) : githubClient(project.repo);
   const deps: PipelineDeps = { project, harness, db, gh, repoTools: repoTools(gh, project.prefilter.ignorePaths) };
   const prNumber = c.fixture?.pr.number ?? c.pr!;
@@ -181,18 +192,24 @@ export function withOverrides(harness: HarnessConfig, overrides: Record<string, 
 }
 
 /** Runs every case, saves the report and returns it with the previous report for comparison. */
-export async function runEvals(project: ProjectConfig, harness: HarnessConfig, onCase?: (r: CaseResult) => void): Promise<{ report: EvalReport; previous?: EvalReport; file: string }> {
+export async function runEvals(
+  project: ProjectConfig,
+  harness: HarnessConfig,
+  onCase?: (r: CaseResult) => void,
+  opts: { memory?: boolean } = {},
+): Promise<{ report: EvalReport; previous?: EvalReport; file: string }> {
+  const memory = opts.memory ?? true;
   const cases = loadCases(project.id);
   if (cases.length === 0) throw new Error(`No eval cases. Add YAML files to projects/${project.id}/evals/cases/ (e.g. 'pr: 16').`);
   const results: CaseResult[] = [];
   for (const c of cases) {
-    const r = await runCase(c, project, harness);
+    const r = await runCase(c, project, harness, memory);
     results.push(r);
     onCase?.(r);
   }
   const dir = join(paths.projectData(project.id), "evals");
   mkdirSync(dir, { recursive: true });
-  const previousFile = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".json")).sort().pop() : undefined;
+  const previousFile = readdirSync(dir).filter((f) => f.endsWith(".json")).sort().pop();
   const previous = previousFile ? (JSON.parse(readFileSync(join(dir, previousFile), "utf8")) as EvalReport) : undefined;
   const report: EvalReport = {
     project: project.id,
@@ -200,6 +217,7 @@ export async function runEvals(project: ProjectConfig, harness: HarnessConfig, o
     harness: harnessVersions(project.id, harness),
     models: Object.fromEntries(Object.entries(harness.roles).map(([r, rc]) => [r, rc.model])),
     decisionModel: harness.decisions.model,
+    memory,
     cases: results,
     summary: summarize(results),
   };

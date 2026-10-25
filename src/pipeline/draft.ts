@@ -5,6 +5,7 @@ import { runChecks, POSTS_PER_FORMAT, type CheckIssue } from "../checks/checks.j
 import { asUntrustedData } from "../core/policy.js";
 import { runAgentJson } from "../core/structured.js";
 import { now } from "../store/db.js";
+import { examplesBlock, recordUsage, selectExamples } from "./memory.js";
 import type { ChangeBrief } from "./brief.js";
 import type { PipelineDeps } from "./types.js";
 
@@ -56,8 +57,10 @@ export interface WriteOptions {
   instruction?: string;
   /** The previous version when revising. */
   previous?: Draft;
-  /** Extra context for the writer, e.g. approved examples (prompt-cache friendly: it goes in the task). */
+  /** Extra context for the writer (it goes in the task, so the cached system prompt stays the same). */
   extra?: string;
+  /** Show the writer approved examples from memory (default true; evals turn it off for a baseline). */
+  memory?: boolean;
 }
 
 const SKILL_FOR: Record<Draft["format"], string> = { post: "x-post", thread: "x-thread", digest: "x-digest" };
@@ -134,7 +137,9 @@ const formatIssues = (issues: CheckIssue[]) => issues.map((i) => `${i.where}: ${
  * Writer → deterministic checks → critic, with at most `maxRevisions` rewrites. Checks failing
  * after the last rewrite are kept on the draft so the owner sees them; the owner always decides.
  */
-export async function composeDraft(o: WriteOptions, deps: PipelineDeps, maxRevisions = 2): Promise<ComposedDraft> {
+export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxRevisions = 2): Promise<ComposedDraft> {
+  const examples = input.memory === false ? [] : selectExamples(deps.db, deps.project.id, input.format, deps.harness.memory.examplesPerDraft);
+  const o: WriteOptions = { ...input, extra: [input.extra, examplesBlock(examples)].filter(Boolean).join("\n\n") || undefined };
   let draft = await write(o, deps, []);
   let issues = runChecks(draft, o.briefs, deps.project);
   let revisions = 0;
@@ -156,6 +161,7 @@ export async function composeDraft(o: WriteOptions, deps: PipelineDeps, maxRevis
 
   const id = randomUUID();
   saveDraft(deps.db, deps.project.id, id, o.briefs.map((b) => b.pr), draft, issues, review, revisions);
+  recordUsage(deps.db, id, examples);
   return { id, draft, issues, critique: review, score: review ? weightedScore(review) : undefined, revisions };
 }
 

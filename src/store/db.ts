@@ -126,6 +126,47 @@ CREATE TABLE IF NOT EXISTS post_metrics (
   fetched_at TEXT NOT NULL,
   PRIMARY KEY (x_id, after_hours)
 );
+CREATE TABLE IF NOT EXISTS memory_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  format TEXT,
+  text TEXT NOT NULL,
+  source_draft TEXT,
+  score REAL NOT NULL DEFAULT 0,
+  uses INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_usage (
+  draft_id TEXT NOT NULL,
+  item_id INTEGER NOT NULL,
+  PRIMARY KEY (draft_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS memory_credits (
+  draft_id TEXT NOT NULL,
+  signal TEXT NOT NULL,
+  delta REAL NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (draft_id, signal)
+);
+CREATE TABLE IF NOT EXISTS lesson_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  text TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  review TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+CREATE TABLE IF NOT EXISTS reflect_runs (
+  project TEXT NOT NULL,
+  last_draft_at TEXT NOT NULL,
+  ran_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS skill_usage (
   run_id TEXT NOT NULL REFERENCES runs(id),
   skill TEXT NOT NULL,

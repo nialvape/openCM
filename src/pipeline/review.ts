@@ -6,6 +6,7 @@ import type { ChangeBrief } from "./brief.js";
 import { composeDraft, DraftSchema, type ComposedDraft, type Critique, type Draft } from "./draft.js";
 import { applyFormat, draftFor, type Outcome } from "./flow.js";
 import type { Format } from "./decide.js";
+import { learnFromOutcome } from "./memory.js";
 import type { PipelineDeps } from "./types.js";
 
 export type DraftStatus = "pending" | "approved" | "rejected" | "superseded" | "published";
@@ -67,12 +68,14 @@ export function approveDraft(deps: PipelineDeps, id: string): StoredDraft {
   const events = eventsForDraft(deps.db, id);
   for (const e of events) updateEvent(deps.db, e.id, { status: "approved" });
   labelFormat(deps, events, formatLabel(final));
+  learnFromOutcome(deps, id, d.final ? "edited" : "approved", final);
   return getDraft(deps, id)!;
 }
 
 export function rejectDraft(deps: PipelineDeps, id: string, reason?: string): StoredDraft {
   requirePending(deps, id);
   setDraftStatus(deps, id, "rejected", { note: reason });
+  learnFromOutcome(deps, id, "rejected");
   for (const e of eventsForDraft(deps.db, id)) updateEvent(deps.db, e.id, { status: "rejected", reason: reason ?? "rejected by the owner" });
   return getDraft(deps, id)!;
 }
@@ -103,6 +106,8 @@ export async function reviseDraft(deps: PipelineDeps, id: string, instruction: s
   const events = eventsForDraft(deps.db, id);
   const draft = await composeDraft({ format: d.draft.format, briefs: events.map((e) => e.brief as ChangeBrief), previous: d.final ?? d.draft, instruction }, deps);
   setDraftStatus(deps, id, "superseded", { note: `rewritten: ${instruction}` });
+  // Needing a rewrite is a mild signal against what this draft was written with.
+  learnFromOutcome(deps, id, "edited");
   for (const e of events) updateEvent(deps.db, e.id, { draftId: draft.id });
   return { events: events.map((e) => getEvent(deps.db, e.id)!), draft };
 }
