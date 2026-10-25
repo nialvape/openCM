@@ -35,6 +35,7 @@ export function testHarness(overrides: Partial<HarnessConfig> = {}): HarnessConf
     pricing: {},
     decisions: { model: "mock:d", thresholds: { default: 0.8 } },
     chat: { compactAtChars: 100_000, keepRecentTurns: 3 },
+    x: { prices: { post: 0.015, postWithLink: 0.2, read: 0.005 }, maxSpendPerDayUsd: 1, metricsAfterHours: [24, 168] },
     ...overrides,
   } as HarnessConfig;
 }

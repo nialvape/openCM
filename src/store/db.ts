@@ -100,6 +100,32 @@ CREATE TABLE IF NOT EXISTS drafts (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  draft_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  x_id TEXT,
+  reply_to TEXT,
+  has_link INTEGER NOT NULL,
+  cost_usd REAL NOT NULL,
+  dry_run INTEGER NOT NULL,
+  posted_at TEXT NOT NULL,
+  UNIQUE (draft_id, position)
+);
+CREATE TABLE IF NOT EXISTS post_metrics (
+  x_id TEXT NOT NULL,
+  after_hours INTEGER NOT NULL,
+  impressions INTEGER,
+  likes INTEGER NOT NULL,
+  reposts INTEGER NOT NULL,
+  replies INTEGER NOT NULL,
+  quotes INTEGER NOT NULL,
+  bookmarks INTEGER,
+  fetched_at TEXT NOT NULL,
+  PRIMARY KEY (x_id, after_hours)
+);
 CREATE TABLE IF NOT EXISTS skill_usage (
   run_id TEXT NOT NULL REFERENCES runs(id),
   skill TEXT NOT NULL,

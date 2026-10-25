@@ -64,3 +64,10 @@ decisions:
 chat:
   compactAtChars: 60000
   keepRecentTurns: 6
+
+# Publishing to X. Prices are the X API pay-per-use list (docs.x.com, checked 2026-10-22): a post with a
+# link costs about 13x a plain one. DRY_RUN=1 in .env (the default) logs instead of posting.
+x:
+  prices: { post: 0.015, postWithLink: 0.2, read: 0.005 }
+  maxSpendPerDayUsd: 1.0
+  metricsAfterHours: [24, 168]

@@ -6,7 +6,7 @@ import type { StoredDraft } from "../../pipeline/review.js";
 import type { ChangeEvent } from "../../store/events.js";
 
 /** Actions on a draft card. Callback data stays under Telegram's 64-byte limit: "d:<uuid>:<action>". */
-export type DraftAction = "approve" | "edit" | "reject" | `to_${Format}`;
+export type DraftAction = "approve" | "edit" | "reject" | "publish" | `to_${Format}`;
 
 export type Callback = { kind: "draft"; draftId: string; action: DraftAction } | { kind: "format"; eventId: string; format: Format };
 
@@ -15,7 +15,7 @@ export function parseCallback(data: string): Callback | undefined {
   const tail = rest.pop();
   const ref = rest.join(":");
   if (!ref || !tail) return undefined;
-  if (prefix === "d" && (["approve", "edit", "reject"].includes(tail) || FORMATS.some((f) => tail === `to_${f}`))) return { kind: "draft", draftId: ref, action: tail as DraftAction };
+  if (prefix === "d" && (["approve", "edit", "reject", "publish"].includes(tail) || FORMATS.some((f) => tail === `to_${f}`))) return { kind: "draft", draftId: ref, action: tail as DraftAction };
   if (prefix === "f" && (FORMATS as string[]).includes(tail)) return { kind: "format", eventId: ref, format: tail as Format };
   return undefined;
 }
@@ -51,3 +51,8 @@ export function formatQuestion(event: ChangeEvent, decision: Pick<FormatDecision
 }
 
 export const EDIT_HELP = "Send an instruction to rewrite it (e.g. \"más corto, sin emojis\"), or start your message with = to use your exact text. In a thread, separate posts with a line containing only ---.";
+
+/** Shown when publishing failed after approval; publishing again skips the parts already posted. */
+export function retryPublishKeyboard(draftId: string): InlineKeyboard {
+  return new InlineKeyboard().text("🔁 Retry publishing", `d:${draftId}:publish`);
+}

@@ -32,12 +32,22 @@ const ChatConfigSchema = z.object({
   keepRecentTurns: z.number().int().positive(),
 });
 
+const XConfigSchema = z.object({
+  /** USD per request, from the X API pay-per-use price list. */
+  prices: z.object({ post: z.number().nonnegative(), postWithLink: z.number().nonnegative(), read: z.number().nonnegative() }),
+  /** Publishing stops for the day once this much was spent on posts. */
+  maxSpendPerDayUsd: z.number().nonnegative(),
+  /** Hours after posting when metrics are read (each read costs prices.read per post). */
+  metricsAfterHours: z.array(z.number().positive()),
+});
+
 export const HarnessConfigSchema = z.object({
   roles: z.record(z.string(), RoleConfigSchema),
   maxToolOutputChars: z.number().int().positive(),
   pricing: z.record(z.string(), PriceSchema),
   decisions: DecisionsConfigSchema,
   chat: ChatConfigSchema,
+  x: XConfigSchema,
 });
 
 export const ProjectConfigSchema = z.object({
@@ -77,6 +87,7 @@ export const ProjectConfigSchema = z.object({
 export type RoleConfig = z.infer<typeof RoleConfigSchema>;
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 export type DecisionsConfig = z.infer<typeof DecisionsConfigSchema>;
+export type XConfig = z.infer<typeof XConfigSchema>;
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
 export class ConfigError extends Error {

@@ -14,10 +14,11 @@ import {
   replaceDraftText,
   reviseDraft,
 } from "../../pipeline/review.js";
+import { collectMetrics, publishDraft } from "../../pipeline/publish.js";
 import { pendingEvents, poll } from "../../pipeline/watch.js";
 import type { PipelineDeps } from "../../pipeline/types.js";
 import { eventsForDraft, eventsWithStatus } from "../../store/events.js";
-import { draftCard, EDIT_HELP, formatQuestion, parseCallback } from "./cards.js";
+import { draftCard, EDIT_HELP, formatQuestion, parseCallback, retryPublishKeyboard } from "./cards.js";
 import { handleOwnerMessage, resetSession, statusSummary } from "./chat.js";
 
 /** Telegram's limit per message is 4096 characters; leave room. */
@@ -112,6 +113,17 @@ export async function startBot(projectId: string): Promise<void> {
     }
   }
 
+  /** Publishing is plain code run on the owner's approval; failures offer a retry that skips what was posted. */
+  async function publishAndReport(draftId: string): Promise<void> {
+    try {
+      const r = await publishDraft(deps, draftId);
+      const lines = r.posts.map((p) => `${p.position + 1}. ${p.url}`).join("\n");
+      await send(r.dryRun ? `🧪 Dry run (DRY_RUN isn't 0), nothing was posted. It would have posted:\n${lines}` : `🚀 Published ($${r.costUsd.toFixed(3)}):\n${lines}`);
+    } catch (e) {
+      await send(`⚠️ Publishing failed: ${errorText(e)}`, retryPublishKeyboard(draftId));
+    }
+  }
+
   let running = false;
   /** One watch pass. Returns how many events it moved; overlapping passes are skipped. */
   async function cycle(): Promise<number> {
@@ -124,6 +136,11 @@ export async function startBot(projectId: string): Promise<void> {
       for (const e of events) await deliver(await advance(e, deps));
       const digest = await maybeDigest(deps);
       if (digest) await deliver(digest);
+      const read = await collectMetrics(deps).catch((e) => {
+        console.error(`metrics error: ${errorText(e)}`);
+        return 0;
+      });
+      if (read) console.log(`read metrics for ${read} post(s)`);
       return events.length;
     } catch (e) {
       console.error(`watch error: ${errorText(e)}`);
@@ -189,7 +206,13 @@ export async function startBot(projectId: string): Promise<void> {
         case "approve":
           await ctx.answerCallbackQuery({ text: "Approved" });
           approveDraft(deps, cb.draftId);
-          await done("✅ Approved. Publishing to X isn't set up yet; it's saved as approved.");
+          await done("✅ Approved. Publishing…");
+          await publishAndReport(cb.draftId);
+          return;
+        case "publish":
+          await ctx.answerCallbackQuery({ text: "Publishing…" });
+          await ctx.editMessageReplyMarkup().catch(() => {});
+          await publishAndReport(cb.draftId);
           return;
         case "reject":
           await ctx.answerCallbackQuery({ text: "Rejected" });
