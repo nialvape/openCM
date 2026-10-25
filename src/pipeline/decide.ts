@@ -26,9 +26,11 @@ export function postsToday(deps: PipelineDeps): number {
   return row.n;
 }
 
-/** Hard rules applied after the model's answer: releases always get a thread, the daily cap holds the rest. */
+/**
+ * Hard rules applied after the model's answer: the daily cap holds posts for the digest. A release
+ * alone doesn't force a thread; it always gets patch notes, and the post format is judged like any PR.
+ */
 export function applyGuards(format: Format, event: ChangeEvent, deps: PipelineDeps): { format: Format; reason?: string } {
-  if (event.version) return { format: "thread", reason: `release ${event.version}` };
   if ((format === "post" || format === "thread") && postsToday(deps) >= deps.project.posting.maxPostsPerDay) {
     return { format: "hold", reason: `daily cap of ${deps.project.posting.maxPostsPerDay} posts reached` };
   }
@@ -41,7 +43,6 @@ export function applyGuards(format: Format, event: ChangeEvent, deps: PipelineDe
  */
 export async function decideFormat(event: ChangeEvent, brief: ChangeBrief, deps: PipelineDeps, model?: Experimental_DecisionModel): Promise<FormatDecision> {
   if (!brief.userFacing && !event.version) return { format: "skip", mergeWithHeld: false, wantsLink: false, reason: "no user-facing change in the brief" };
-  if (event.version) return { format: "thread", mergeWithHeld: true, wantsLink: true, reason: `release ${event.version}` };
 
   const held = eventsWithStatus(deps.db, deps.project.id, "held");
   const state = {

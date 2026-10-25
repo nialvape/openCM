@@ -62,6 +62,16 @@ describe("runAgent", () => {
     expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("Error from lookup: exploded");
   });
 
+  it("forces an answer on the last allowed step instead of another tool call", async () => {
+    const db = openDb(":memory:");
+    const model = new MockLanguageModelV4({ doGenerate: [toolCall("c1", { q: "a" }), answer("con lo que tengo")] });
+    const result = await runAgent({ role: "tester", task: "t", tools: { lookup }, harness: harness({ maxSteps: 2 }), model, db });
+    expect(result).toMatchObject({ status: "done", text: "con lo que tengo" });
+    expect(model.doGenerateCalls[0].toolChoice).toEqual({ type: "auto" });
+    expect(model.doGenerateCalls[1].toolChoice).toEqual({ type: "none" });
+    expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain("You have no tool calls left");
+  });
+
   it("stops at the step budget", async () => {
     const db = openDb(":memory:");
     const model = new MockLanguageModelV4({ doGenerate: [toolCall("c1", { q: "a" }), toolCall("c2", { q: "b" })] });

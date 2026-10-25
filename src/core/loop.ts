@@ -50,6 +50,8 @@ export interface RunResult {
   messages: ModelMessage[];
 }
 
+const LAST_STEP_NOTE = "You have no tool calls left. Give your final answer now, in the requested format, with what you already know.";
+
 const PLAN_NOTE = "\n\nBefore using any tool, write a short numbered plan. Then follow it, adjusting if you learn something new.";
 
 /**
@@ -117,11 +119,15 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
   try {
     while (step < rc.maxSteps) {
       currentStep = step;
+      // The last allowed step must produce an answer: a run that ends mid-research is wasted spend.
+      const lastStep = rc.maxSteps > 1 && step === rc.maxSteps - 1 && Object.keys(tools).length > 0;
+      if (lastStep) messages = [...messages, { role: "user", content: LAST_STEP_NOTE }];
       const result = await generateText({
         model,
         instructions: prompt.instructions,
         messages,
         tools,
+        ...(lastStep ? { toolChoice: "none" as const } : {}),
         maxOutputTokens: rc.maxOutputTokens,
         timeout: rc.stepTimeoutSec ? { stepMs: rc.stepTimeoutSec * 1000 } : undefined,
         reasoning: opts.reasoning ?? rc.reasoning,

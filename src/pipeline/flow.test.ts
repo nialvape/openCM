@@ -180,6 +180,16 @@ describe("advance", () => {
     expect(out).toMatchObject({ kind: "ask_format" });
   });
 
+  it("lets the decision model judge a release instead of forcing a thread", async () => {
+    const writer = mockModel(answer(draftJson({ posts: [{ text: "Ya podés entrar con Office 365.", claims: ["23:c1"] }] })));
+    const d = deps({}, { writer, critic: mockModel(answer(okCritique)) });
+    const e = seeded(d, 23, brief(23));
+    updateEvent(d.db, e.id, { version: "0.8.1" });
+    const out = await advance(getEventByPr(d.db, "demo", 23)!, d, decision("post", 0.95));
+    expect(out.kind).toBe("drafted");
+    expect(getEventByPr(d.db, "demo", 23)?.format).toBe("post");
+  });
+
   it("skips briefs with nothing user-facing without asking any model", async () => {
     const d = deps();
     const out = await advance(seeded(d, 19, brief(19, { userFacing: false })), d, decision("thread", 1));

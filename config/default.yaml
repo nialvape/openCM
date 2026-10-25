@@ -12,9 +12,10 @@ roles:
   analyst:
     model: gateway:zai/glm-5.3
     tools: [repo_list, repo_read_file, repo_diff, repo_search, get_pr, load_skill]
-    maxSteps: 25
-    maxCostUsd: 0.50
+    maxSteps: 10
+    maxCostUsd: 0.20
     plan: false
+    reasoning: low
   writer:
     model: gateway:zai/glm-5.3
     tools: [load_skill, measure_posts]
@@ -30,6 +31,7 @@ roles:
     maxCostUsd: 0.10
     plan: false
     maxOutputTokens: 2000
+    reasoning: low
   chat:
     model: gateway:zai/glm-5.3-flash
     tools: [repo_list, repo_read_file, repo_search, get_pr, list_prs, load_skill, send_message]
@@ -57,6 +59,7 @@ roles:
     maxCostUsd: 0.10
     plan: false
     maxOutputTokens: 2000
+    reasoning: low
 
 # Largest tool result (in characters) put in context; longer outputs are cut with a note on how to page.
 maxToolOutputChars: 12000

@@ -30,7 +30,7 @@ src/
   tools/measure.ts    measure_posts: X's exact weighted length per post; the only way agents get a character count
   pipeline/           watch.ts: poll → prefilter → brief (analyst) → patch notes on a release
                       brief.ts: ChangeBrief schema (each change with file evidence); patch-notes.ts
-                      decide.ts: format via the decision model + guards (release → thread, daily cap → hold)
+                      decide.ts: format via the decision model + guard (daily cap → hold); releases also get patch notes
                       draft.ts: writer → checks → critic, ≤2 rewrites; flow.ts: advance() one event, digest
   checks/checks.ts    deterministic checks on drafts: weighted length, link policy, claims vs brief, banned terms, secrets
   evals/run.ts        eval runner: core cases (evals/cases, e.g. prompt injection) + project cases; reports in data/

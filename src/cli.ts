@@ -23,7 +23,7 @@ Usage:
   opencm bot <project>                    Start the Telegram bot (long polling, owner only)
   opencm run <project>                    Check GitHub once for newly merged PRs and process them
   opencm pr <project> <number>            Process one merged PR now, even an old one
-  opencm eval <project> [--model role=id] [--no-memory]
+  opencm eval <project> [--model role=id] [--no-memory] [--fresh-briefs]
                                           Run the eval cases and compare with the last report
   opencm doctor <project>                 Validate config, list skills and the harness version of each role
   opencm ask <project> <role> "<task>"    Run one role on a free-form task (smoke test)
@@ -101,7 +101,7 @@ async function runOnce(projectId: string): Promise<number> {
 function parseOverrides(args: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--no-memory") continue;
+    if (args[i] === "--no-memory" || args[i] === "--fresh-briefs") continue;
     if (args[i] !== "--model") throw new ConfigError(`Unknown option '${args[i]}'. Use --model <role>=<provider>:<model>`);
     const [role, ...rest] = (args[++i] ?? "").split("=");
     if (!role || !rest.length) throw new ConfigError("--model needs <role>=<provider>:<model>, e.g. writer=openrouter:openai/gpt-6-luna");
@@ -117,6 +117,7 @@ async function evals(projectId: string, args: string[]): Promise<number> {
   const memory = !args.includes("--no-memory");
   const { report: r, previous, file } = await runEvals(project, harness, (c) => {
     const bits = [
+      c.briefCached ? "cached brief" : "",
       c.format ? `${c.format}${c.expectedFormat ? (c.formatCorrect === undefined ? ` (expected ${c.expectedFormat}, model unsure)` : c.formatCorrect ? " ✓" : ` ✗ expected ${c.expectedFormat}`) : ""}` : "",
       c.checksPassed === undefined ? "" : c.checksPassed ? "checks ok" : `${c.checkIssues.length} check issues`,
       c.criticScore !== undefined ? `critic ${c.criticScore}` : "",
@@ -127,12 +128,13 @@ async function evals(projectId: string, args: string[]): Promise<number> {
     ].filter(Boolean);
     console.log(`${c.name} (#${c.pr}): ${bits.join(" · ")}`);
     for (const issue of c.checkIssues) console.log(`    ! ${issue}`);
-  }, { memory });
+  }, { memory, freshBriefs: args.includes("--fresh-briefs") });
   const s = r.summary;
   const line = (label: string, now: string, before?: string) => console.log(`  ${label.padEnd(16)} ${now}${before !== undefined && before !== now ? `  (before: ${before})` : ""}`);
   const ps = previous?.summary;
   console.log(`\nSummary (${r.cases.length} cases${memory ? "" : ", no memory: baseline"})`);
   line("format accuracy", pct(s.formatAccuracy), ps && pct(ps.formatAccuracy));
+  line("model unsure", pct(s.unsureRate), ps && pct(ps.unsureRate));
   line("checks passed", pct(s.checkPassRate), ps && pct(ps.checkPassRate));
   line("critic score", `${s.meanCriticScore ?? "n/a"}`, ps && `${ps.meanCriticScore ?? "n/a"}`);
   line("mentions", pct(s.mentionRate), ps && pct(ps.mentionRate));

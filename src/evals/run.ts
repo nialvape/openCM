@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -12,7 +13,7 @@ import type { PipelineDeps } from "../pipeline/types.js";
 import { getPullRequest } from "../sources/github/changes.js";
 import { githubClient, GitHubError, type GitHubClient, type PullRequest, type PullRequestFile } from "../sources/github/client.js";
 import { db as sharedDb, openDb } from "../store/db.js";
-import { addEvent, getEventByPr } from "../store/events.js";
+import { addEvent, getEventByPr, updateEvent } from "../store/events.js";
 import { repoTools } from "../tools/repo.js";
 
 const CaseSchema = z.object({
@@ -43,6 +44,8 @@ export interface CaseResult {
   expectedFormat?: string;
   format?: string;
   formatSource: "model" | "rule" | "unsure" | "failed";
+  /** The analyst didn't run: the brief came from an earlier eval with the same analyst. */
+  briefCached: boolean;
   formatCorrect?: boolean;
   checksPassed?: boolean;
   checkIssues: string[];
@@ -66,7 +69,7 @@ export interface EvalReport {
   /** False for a no-memory baseline run (--no-memory). */
   memory: boolean;
   cases: CaseResult[];
-  summary: { formatAccuracy?: number; checkPassRate?: number; meanCriticScore?: number; mentionRate?: number; avoidViolations: number; failures: number; costUsd: number };
+  summary: { formatAccuracy?: number; unsureRate?: number; checkPassRate?: number; meanCriticScore?: number; mentionRate?: number; avoidViolations: number; failures: number; costUsd: number };
 }
 
 function readCases(dir: string): EvalCase[] {
@@ -119,20 +122,41 @@ function copyMemory(projectId: string, db: ReturnType<typeof openDb>): void {
   }
 }
 
-async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig, memory: boolean): Promise<CaseResult> {
+/**
+ * Where briefs from earlier evals are kept. The key is what produces a brief: the analyst's harness
+ * version and the brief step's code. Re-briefing the same PRs was half the cost of every eval.
+ */
+function briefCacheDir(project: ProjectConfig, harness: HarnessConfig): string {
+  const code = ["src/pipeline/brief.ts", "src/sources/github/changes.ts"].map((f) => (existsSync(join(paths.root, f)) ? readFileSync(join(paths.root, f), "utf8") : "")).join("\n");
+  const key = createHash("sha256").update(harnessVersions(project.id, harness).analyst + code).digest("hex").slice(0, 12);
+  return join(paths.projectData(project.id), "evals", "briefs", key);
+}
+
+const caseKey = (c: EvalCase) => (c.fixture ? `${c.name}-${createHash("sha256").update(JSON.stringify(c.fixture)).digest("hex").slice(0, 8)}` : c.name);
+
+async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConfig, memory: boolean, briefs: { dir: string; fresh: boolean }): Promise<CaseResult> {
   const db = openDb(":memory:");
   if (memory) copyMemory(project.id, db);
   const gh = c.fixture ? fixtureGitHub(project.repo, c.fixture) : githubClient(project.repo);
   const deps: PipelineDeps = { project, harness, db, gh, repoTools: repoTools(gh, project.prefilter.ignorePaths) };
   const prNumber = c.fixture?.pr.number ?? c.pr!;
   const expectedFormat = c.expect.format ?? (c.fixture ? undefined : ownerLabel(project.id, prNumber));
-  const base: CaseResult = { name: c.name, pr: prNumber, expectedFormat, formatSource: "failed", checkIssues: [], mentionMissing: [], avoidFound: [], costUsd: 0 };
+  const base: CaseResult = { name: c.name, pr: prNumber, expectedFormat, formatSource: "failed", briefCached: false, checkIssues: [], mentionMissing: [], avoidFound: [], costUsd: 0 };
   const cost = () => (db.prepare("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM runs").get() as { c: number }).c;
 
   try {
     const { pr } = await getPullRequest(gh, prNumber);
     addEvent(db, { project: project.id, pr: prNumber, title: pr.title, url: pr.html_url, mergedAt: pr.merged_at ?? new Date().toISOString() });
+    const cacheFile = join(briefs.dir, `${caseKey(c)}.json`);
+    const cached = !briefs.fresh && existsSync(cacheFile) ? (JSON.parse(readFileSync(cacheFile, "utf8")) as { brief: unknown; version?: string }) : undefined;
+    // A cached brief starts the event at the decision; patch notes for releases aren't rebuilt then.
+    if (cached) updateEvent(db, `${project.id}:pr:${prNumber}`, { status: "briefed", brief: cached.brief, ...(cached.version ? { version: cached.version } : {}) });
     let outcome = await advance(getEventByPr(db, project.id, prNumber)!, deps);
+    const briefed = getEventByPr(db, project.id, prNumber);
+    if (!cached && briefed?.brief) {
+      mkdirSync(briefs.dir, { recursive: true });
+      writeFileSync(cacheFile, JSON.stringify({ brief: briefed.brief, version: briefed.version }, null, 2));
+    }
     let formatSource: CaseResult["formatSource"] = "model";
     let format: string | undefined;
     if (outcome.kind === "ask_format") {
@@ -142,7 +166,7 @@ async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConf
     } else if (outcome.kind === "skipped" && /prefilter|label|branch|only ignored|no user-facing/.test(outcome.reason)) {
       formatSource = "rule";
     }
-    if (outcome.kind === "failed") return { ...base, error: outcome.reason, costUsd: cost() };
+    if (outcome.kind === "failed") return { ...base, briefCached: !!cached, error: outcome.reason, costUsd: cost() };
     format = outcome.kind === "drafted" ? outcome.draft.draft.format : outcome.kind === "held" ? "hold" : outcome.kind === "skipped" ? "skip" : undefined;
 
     const content = contentOf(outcome);
@@ -150,6 +174,7 @@ async function runCase(c: EvalCase, project: ProjectConfig, harness: HarnessConf
     const drafted = outcome.kind === "drafted" ? outcome.draft : undefined;
     return {
       ...base,
+      briefCached: !!cached,
       format,
       formatSource,
       formatCorrect: expectedFormat && formatSource !== "unsure" ? format === expectedFormat : undefined,
@@ -175,6 +200,8 @@ export function summarize(cases: CaseResult[]): EvalReport["summary"] {
   const withMentions = cases.filter((c) => c.content);
   return {
     formatAccuracy: judged.length ? mean(judged.map((c) => (c.formatCorrect ? 1 : 0))) : undefined,
+    // Unsure answers go to the owner and don't count toward accuracy, so report how often that happens.
+    unsureRate: cases.length ? mean(cases.map((c) => (c.formatSource === "unsure" ? 1 : 0))) : undefined,
     checkPassRate: checked.length ? mean(checked.map((c) => (c.checksPassed ? 1 : 0))) : undefined,
     meanCriticScore: mean(cases.flatMap((c) => (c.criticScore !== undefined ? [c.criticScore] : []))),
     mentionRate: withMentions.length ? mean(withMentions.map((c) => (c.mentionMissing.length === 0 ? 1 : 0))) : undefined,
@@ -209,14 +236,15 @@ export async function runEvals(
   project: ProjectConfig,
   harness: HarnessConfig,
   onCase?: (r: CaseResult) => void,
-  opts: { memory?: boolean } = {},
+  opts: { memory?: boolean; freshBriefs?: boolean } = {},
 ): Promise<{ report: EvalReport; previous?: EvalReport; file: string }> {
   const memory = opts.memory ?? true;
+  const briefs = { dir: briefCacheDir(project, harness), fresh: opts.freshBriefs ?? false };
   const cases = loadCases(project.id);
   if (cases.length === 0) throw new Error(`No eval cases. Add YAML files to projects/${project.id}/evals/cases/ (e.g. 'pr: 16').`);
   const results: CaseResult[] = [];
   for (const c of cases) {
-    const r = await runCase(c, project, harness, memory);
+    const r = await runCase(c, project, harness, memory, briefs);
     results.push(r);
     onCase?.(r);
   }
