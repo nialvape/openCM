@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
-import { renderDraft, weightedScore } from "../../pipeline/draft.js";
+import { weightedScore, type Draft } from "../../pipeline/draft.js";
+import { measure, X_LIMIT } from "../../tools/measure.js";
 import type { FormatDecision } from "../../pipeline/decide.js";
 import { FORMATS, type Format } from "../../pipeline/decide.js";
 import type { LessonProposal } from "../../pipeline/reflect.js";
@@ -27,15 +28,40 @@ export function parseCallback(data: string): Callback | undefined {
 
 const LABELS: Record<Format, string> = { skip: "Skip", hold: "Hold for digest", post: "Single post", thread: "Thread" };
 
+/** Critic notes shown on a card, and how long each may be: the post is what the owner reads first. */
+const MAX_NOTES = 3;
+const MAX_NOTE_CHARS = 180;
+const RULE = "────────────";
+
+const clipNote = (s: string) => (s.length > MAX_NOTE_CHARS ? `${s.slice(0, MAX_NOTE_CHARS - 1).trimEnd()}…` : s);
+
+/** Each post with its exact X length, so a thread reads as a thread and a long post as one post. */
+function renderPosts(d: Draft): string {
+  const lengths = measure(d.posts.map((p) => p.text));
+  const posts = d.posts.map((p, i) => {
+    const label = d.posts.length > 1 ? `${i + 1}/${d.posts.length}` : "Post";
+    return `${label} · ${lengths[i].length}/${X_LIMIT}${lengths[i].fits ? "" : " ⚠️"}\n${p.text}`;
+  });
+  if (d.linkReply) posts.push(`↳ Reply with the link\n${d.linkReply}`);
+  return posts.join("\n\n");
+}
+
 export function draftCard(d: StoredDraft, events: ChangeEvent[]): { text: string; keyboard: InlineKeyboard } {
   const shown = d.final ?? d.draft;
-  const prs = events.map((e) => `#${e.pr} ${e.title}`).join("\n");
-  const score = d.critique ? `critic ${weightedScore(d.critique)}/5` : "no critic score";
-  const header = `📝 ${shown.format.toUpperCase()} draft · ${score} · ${d.revisions} rewrites${d.final ? " · edited by you" : ""}`;
-  const issues = d.issues.length ? `\n⚠️ Checks still failing:\n${d.issues.map((i) => `- ${i.where}: ${i.message}`).join("\n")}\n` : "";
-  const fixes = d.critique?.fixes.length && d.critique.verdict === "revise" ? `\n🧐 Critic: ${d.critique.fixes.join(" · ")}\n` : "";
-  const links = events.map((e) => e.url).join("\n");
-  const text = `${header}\n${prs}\n${issues}${fixes}\n${renderDraft(shown)}\n\n${links}`;
+  const kind = shown.format === "thread" ? `THREAD of ${shown.posts.length} posts` : shown.format.toUpperCase();
+  const score = d.critique ? ` · critic ${weightedScore(d.critique)}/5` : "";
+  const header = `📝 ${kind}${score}${d.final ? " · edited by you" : ""}\n${events.map((e) => `#${e.pr} ${e.title}`).join("\n")}`;
+
+  const notes: string[] = [];
+  if (d.issues.length) notes.push(`⚠️ Checks still failing:\n${d.issues.map((i) => `- ${i.where}: ${i.message}`).join("\n")}`);
+  // Only what the critic still objects to after the rewrites; the full critique stays in the database.
+  if (d.critique?.verdict === "revise" && d.critique.fixes.length && !d.final) {
+    const fixes = d.critique.fixes;
+    const more = fixes.length > MAX_NOTES ? `\n(+${fixes.length - MAX_NOTES} more)` : "";
+    notes.push(`🧐 Critic, still unresolved after ${d.revisions} rewrites:\n${fixes.slice(0, MAX_NOTES).map((f) => `- ${clipNote(f)}`).join("\n")}${more}`);
+  }
+
+  const text = [header, RULE, renderPosts(shown), RULE, ...notes, events.map((e) => e.url).join("\n")].join("\n\n");
 
   const kb = new InlineKeyboard().text("✅ Approve", `d:${d.id}:approve`).text("✏️ Edit", `d:${d.id}:edit`).text("🗑 Reject", `d:${d.id}:reject`).row();
   for (const f of FORMATS) if (f !== shown.format && !(f === "hold" && shown.format === "digest")) kb.text(`→ ${LABELS[f]}`, `d:${d.id}:to_${f}`);
