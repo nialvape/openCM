@@ -1,7 +1,7 @@
 {
   "name": "opencm",
   "version": "0.1.0",
-  "description": "Harness for a Community Manager agent for open-source projects: patch notes, X posts and a Telegram channel with the maintainer.",
+  "description": "Harness for a Community Manager agent for software products and projects: patch notes, X posts and a Telegram channel with the maintainer.",
   "type": "module",
   "private": true,
   "bin": {

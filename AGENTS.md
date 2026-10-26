@@ -1,6 +1,6 @@
 # openCM
 
-Harness for a Community Manager agent for open-source projects. It follows a repo, writes patch notes and X posts about what changed, asks the maintainer for approval on Telegram and learns from the answers. The design, its research basis and the build phases are in `docs/plan.md`; this file is the map.
+Harness for a Community Manager agent for software products and projects (open source or private). It follows a repo, writes patch notes and X posts about what changed, asks the maintainer for approval on Telegram and learns from the answers. The design, its research basis and the build phases are in `docs/plan.md`; this file is the map.
 
 ## Layout
 
