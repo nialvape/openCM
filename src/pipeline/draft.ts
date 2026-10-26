@@ -87,7 +87,7 @@ function writeTask(o: WriteOptions, deps: PipelineDeps, issues: string[]): strin
     'Each post lists in "claims" the changes it states, as "<pr>:<change id>" (e.g. "16:c1"). Only state what the briefs support.',
     o.extra ?? "",
     o.previous ? `Previous version:\n${JSON.stringify(o.previous, null, 2)}` : "",
-    o.instruction ? `The maintainer asked for this change: ${o.instruction}` : "",
+    o.instruction ? `The maintainer asked for this change: ${o.instruction}\nIt wins over any other correction below that contradicts it.` : "",
     issues.length ? `Fix these problems:\n${issues.map((i) => `- ${i}`).join("\n")}` : "",
     o.applied?.length ? `The previous version already applies these earlier corrections. Keep them all:\n${o.applied.map((i) => `- ${i}`).join("\n")}` : "",
     'Answer with only JSON: {"format": "...", "posts": [{"text": "...", "claims": ["..."]}], "linkReply": "optional"}',
@@ -120,7 +120,7 @@ const formatSize = (format: Draft["format"]) => {
   return min === max ? `exactly ${min} post${min === 1 ? "" : "s"}` : `${min} to ${max} posts`;
 };
 
-async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps): Promise<Critique> {
+async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps, ownerInstruction?: string): Promise<Critique> {
   const { value } = await runAgentJson(CritiqueSchema, {
     role: "critic",
     projectId: deps.project.id,
@@ -128,11 +128,17 @@ async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps)
       `Review this ${draft.format} draft against the change briefs.`,
       // Without the shape the critic asked to split a single post in two, which the checks then reject.
       `The format is fixed: a ${draft.format} has ${formatSize(draft.format)}. Never suggest adding or splitting posts; if something doesn't fit, say what to drop.`,
+      // Without this the critic undid the owner's own request (plural address, no "NO OFICIAL") as off-voice.
+      ownerInstruction
+        ? `The maintainer asked for this version: "${ownerInstruction}". That's their decision, above the voice and the glossary: never ask to undo it.`
+        : "",
       `Draft:\n${JSON.stringify(draft, null, 2)}`,
       // The critic can't count either; without this it asked to add text to posts that were full.
       `Length of each post as X counts it (limit ${X_LIMIT}):\n${measure(draft.posts.map((p) => p.text)).map((m) => `post ${m.post}: ${m.length}/${X_LIMIT}`).join("\n")}`,
       asUntrustedData("change briefs", JSON.stringify(briefs, null, 2)),
-    ].join("\n\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     harness: deps.harness,
     db: deps.db,
     model: deps.models?.critic,
@@ -221,7 +227,9 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
   if (input.briefs.length === 0) throw new Error("This draft has no PRs attached, so there's nothing to write from. Ask for it again with /pr <number>.");
   const examples = input.memory === false ? [] : selectExamples(deps.db, deps.project.id, input.format, deps.harness.memory.examplesPerDraft);
   const o: WriteOptions = { ...input, extra: [input.extra, examplesBlock(examples)].filter(Boolean).join("\n\n") || undefined };
-  let { draft, issues } = await repairLocal(await write(o, deps, []), o, deps);
+  // The owner's request, when there is one, must survive every shortening too.
+  const owner = o.instruction ? [`The maintainer's request: ${o.instruction}`] : [];
+  let { draft, issues } = await repairLocal(await write(o, deps, []), o, deps, owner);
   let revisions = 0;
   let review: Critique | undefined;
   const applied: string[] = [];
@@ -231,7 +239,7 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
 
   while (true) {
     if (issues.length === 0) {
-      review = await critique(draft, o.briefs, deps);
+      review = await critique(draft, o.briefs, deps, o.instruction);
       passing = { draft, review };
       if (!needsRevision(review) || revisions >= maxRevisions) break;
     } else if (revisions >= maxRevisions) {
@@ -240,7 +248,7 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
     }
     const feedback = issues.length ? formatIssues(issues) : review!.fixes.length ? review!.fixes : ["The reviewer asked for a better version."];
     // Earlier rounds' corrections ride along: without them a rewrite for new problems undid old fixes.
-    ({ draft, issues } = await repairLocal(await write({ ...o, previous: draft, applied }, deps, feedback), o, deps, [...applied, ...feedback]));
+    ({ draft, issues } = await repairLocal(await write({ ...o, previous: draft, applied }, deps, feedback), o, deps, [...owner, ...applied, ...feedback]));
     applied.push(...feedback);
     review = undefined;
     revisions++;

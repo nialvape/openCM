@@ -323,6 +323,15 @@ describe("advance", () => {
     expect(JSON.stringify(writer.doGenerateCalls[2].prompt)).toContain("feature 29");
   });
 
+  it("puts the owner's request above the critic's corrections", async () => {
+    const instruction = 'hablales en plural: "ya pueden"';
+    const writer = mockModel(answer(draftJson({ posts: [{ text: "Ya pueden usar la TUP.", claims: ["16:c1"] }] })), answer(draftJson({ posts: [{ text: "Ya pueden usar la TUP 🎉", claims: ["16:c1"] }] })));
+    const critic = mockModel(answer(badCritique), answer(okCritique));
+    await composeDraft({ format: "post", briefs: [brief(16)], instruction }, deps({}, { writer, critic }));
+    expect(JSON.stringify(critic.doGenerateCalls[0].prompt)).toContain("That's their decision, above the voice and the glossary: never ask to undo it.");
+    expect(JSON.stringify(writer.doGenerateCalls[1].prompt)).toContain("It wins over any other correction below that contradicts it.");
+  });
+
   it("refuses to write a draft with no PRs behind it", async () => {
     await expect(composeDraft({ format: "post", briefs: [] }, deps())).rejects.toThrow(/no PRs attached/);
   });
