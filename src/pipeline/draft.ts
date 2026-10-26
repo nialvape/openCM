@@ -217,6 +217,8 @@ async function repairLocal(draft: Draft, o: WriteOptions, deps: PipelineDeps, ke
  * after the last rewrite are kept on the draft so the owner sees them; the owner always decides.
  */
 export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxRevisions = 2): Promise<ComposedDraft> {
+  // Without briefs the writer has no facts and the claims check nothing to verify against.
+  if (input.briefs.length === 0) throw new Error("This draft has no PRs attached, so there's nothing to write from. Ask for it again with /pr <number>.");
   const examples = input.memory === false ? [] : selectExamples(deps.db, deps.project.id, input.format, deps.harness.memory.examplesPerDraft);
   const o: WriteOptions = { ...input, extra: [input.extra, examplesBlock(examples)].filter(Boolean).join("\n\n") || undefined };
   let { draft, issues } = await repairLocal(await write(o, deps, []), o, deps);
@@ -246,8 +248,20 @@ export async function composeDraft(input: WriteOptions, deps: PipelineDeps, maxR
 
   const id = randomUUID();
   saveDraft(deps.db, deps.project.id, id, o.briefs.map((b) => b.pr), draft, issues, review, revisions);
+  supersedeOlderDrafts(deps.db, deps.project.id, id, o.briefs.map((b) => b.pr));
   recordUsage(deps.db, id, examples);
   return { id, draft, issues, critique: review, score: review ? weightedScore(review) : undefined, revisions };
+}
+
+/**
+ * One live draft per PR: a new draft about a PR replaces any pending one about it. Otherwise the
+ * old card stayed actionable, and editing it rewrote a draft whose PRs had moved on.
+ */
+function supersedeOlderDrafts(db: DatabaseSync, project: string, id: string, prs: number[]): void {
+  db.prepare(
+    `UPDATE drafts SET status = 'superseded', owner_note = COALESCE(owner_note, ?), updated_at = ?
+     WHERE project = ? AND status = 'pending' AND id != ? AND EXISTS (SELECT 1 FROM json_each(drafts.prs) WHERE value IN (${prs.map(() => "?").join(", ")}))`,
+  ).run(`replaced by draft ${id}`, now(), project, id, ...prs);
 }
 
 function saveDraft(db: DatabaseSync, project: string, id: string, prs: number[], draft: Draft, issues: CheckIssue[], review: Critique | undefined, revisions: number): void {

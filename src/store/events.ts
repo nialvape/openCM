@@ -113,6 +113,16 @@ export function updateEvent(
   db.prepare(`UPDATE events SET ${sets.join(", ")} WHERE id = ?`).run(...args, id);
 }
 
+/**
+ * The PRs a draft is about, from the draft's own list. Events only point at their latest draft, so
+ * looking them up that way left an older draft with no PRs, and editing it wrote without any brief.
+ */
 export function eventsForDraft(db: DatabaseSync, draftId: string): ChangeEvent[] {
-  return db.prepare("SELECT * FROM events WHERE draft_id = ? ORDER BY merged_at").all(draftId).map(fromRow);
+  const draft = db.prepare("SELECT project, prs FROM drafts WHERE id = ?").get(draftId) as { project: string; prs: string } | undefined;
+  const prs = draft ? (JSON.parse(draft.prs) as number[]) : [];
+  if (!draft || prs.length === 0) return db.prepare("SELECT * FROM events WHERE draft_id = ? ORDER BY merged_at").all(draftId).map(fromRow);
+  return db
+    .prepare(`SELECT * FROM events WHERE project = ? AND pr IN (${prs.map(() => "?").join(", ")}) ORDER BY merged_at`)
+    .all(draft.project, ...prs)
+    .map(fromRow);
 }

@@ -18,6 +18,8 @@ export interface ChatDeps {
    * Drafts go through the writer, checks and critic, and reach X only when the owner approves the card.
    */
   draftPr?: (prs: number[], format?: "post" | "thread") => Promise<string>;
+  /** Rewrites the latest pending draft following the owner's instruction and sends its new card. */
+  reviseDraft?: (instruction: string) => Promise<string>;
   /** Injected for tests; otherwise each role's model from config. */
   models?: { chat?: LanguageModel; compactor?: LanguageModel };
 }
@@ -88,6 +90,15 @@ function draftForPrTool(draftPr: NonNullable<ChatDeps["draftPr"]>): AgentTool<{ 
   };
 }
 
+function reviseDraftTool(reviseDraft: NonNullable<ChatDeps["reviseDraft"]>): AgentTool<{ instruction: string }> {
+  return {
+    description:
+      "Rewrites the latest draft card following the owner's instruction (e.g. add an emoji, mention the hosted version, make it shorter) and sends the new card. Use it whenever the owner asks to change a draft they already got, instead of draft_for_pr, which starts over without their instruction.",
+    inputSchema: z.object({ instruction: z.string().min(1).describe("The owner's requested change, in their words") }),
+    execute: async ({ instruction }) => reviseDraft(instruction),
+  };
+}
+
 /**
  * One owner message → one chat run. The session (what the model sees) and the transcript (what
  * was said in Telegram) are stored apart; the session may be compacted, the transcript never is.
@@ -112,7 +123,12 @@ export async function handleOwnerMessage(chatId: string, text: string, send: Sen
     projectId: deps.project.id,
     task: latest.content as string,
     history: compacted.messages.slice(0, -1),
-    tools: { ...deps.repoTools, send_message: sendMessageTool(send, db, chatId), ...(deps.draftPr ? { draft_for_pr: draftForPrTool(deps.draftPr) } : {}) },
+    tools: {
+      ...deps.repoTools,
+      send_message: sendMessageTool(send, db, chatId),
+      ...(deps.draftPr ? { draft_for_pr: draftForPrTool(deps.draftPr) } : {}),
+      ...(deps.reviseDraft ? { revise_draft: reviseDraftTool(deps.reviseDraft) } : {}),
+    },
     harness: deps.harness,
     db,
     model: deps.models?.chat,

@@ -128,6 +128,15 @@ describe("handleOwnerMessage", () => {
     expect(asked).toEqual([[[17], undefined]]);
   });
 
+  it("revises the current draft with the owner's words when asked to change it", async () => {
+    const chat = new MockLanguageModelV4({ doGenerate: [call("revise_draft", { instruction: "agregá un emoji" }), answer("Te mandé la versión nueva.")] });
+    const asked: string[] = [];
+    const d = { ...deps(harness(), chat), reviseDraft: async (i: string) => (asked.push(i), "the rewritten post was sent") };
+    d.harness.roles.chat = role(["get_pr", "send_message", "revise_draft"]);
+    await handleOwnerMessage("42", "agregale un emoji", async () => {}, d);
+    expect(asked).toEqual(["agregá un emoji"]);
+  });
+
   it("forgets the conversation after /new", async () => {
     const chat = new MockLanguageModelV4({ doGenerate: [answer("uno"), answer("dos")] });
     const d = deps(harness(), chat);

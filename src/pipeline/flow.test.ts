@@ -9,6 +9,7 @@ import { answer, fakeGitHub, mockModel, pr, prRoutes, testHarness, testProject, 
 import { repoTools } from "../tools/repo.js";
 import type { ChangeBrief } from "./brief.js";
 import { composeDraft, needsRevision, weightedScore, type Draft } from "./draft.js";
+import { getDraft, reviseDraft } from "./review.js";
 import { bumpLevel, ownerPrecedents } from "./decide.js";
 import { advance, draftPullRequest, draftPullRequests, maybeDigest } from "./flow.js";
 import type { PipelineDeps } from "./types.js";
@@ -300,6 +301,30 @@ describe("advance", () => {
     expect(task).toContain("feature 28");
     expect(task).toContain("feature 29");
     expect(analyst.doGenerateCalls).toHaveLength(0);
+  });
+
+  it("replaces the older draft of the same PRs instead of leaving it editable with no PRs", async () => {
+    const post = (t: string) => answer(draftJson({ posts: [{ text: t, claims: ["28:c1", "29:c1"] }] }));
+    const writer = mockModel(post("Primera versión de 28 y 29."), post("Segunda versión de 28 y 29."), post("Tercera, con emoji 🎉."));
+    const critic = mockModel(answer(okCritique), answer(okCritique), answer(okCritique));
+    const d = deps({ ...prRoutes(pr(28), files), ...prRoutes(pr(29), files) }, { writer, critic });
+    seeded(d, 28, brief(28));
+    seeded(d, 29, brief(29));
+
+    const first = await draftPullRequests([28, 29], d);
+    const second = await draftPullRequests([28, 29], d);
+    if (first.kind !== "drafted" || second.kind !== "drafted") throw new Error("expected drafts");
+    expect(getDraft(d, first.draft.id)?.status).toBe("superseded");
+    await expect(reviseDraft(d, first.draft.id, "agregá un emoji")).rejects.toThrow(/replaced by a newer one/);
+
+    // Editing the current one still finds both PRs, from the draft's own list.
+    const { draft } = await reviseDraft(d, second.draft.id, "agregá un emoji");
+    expect(getDraft(d, draft.id)?.prs).toEqual([28, 29]);
+    expect(JSON.stringify(writer.doGenerateCalls[2].prompt)).toContain("feature 29");
+  });
+
+  it("refuses to write a draft with no PRs behind it", async () => {
+    await expect(composeDraft({ format: "post", briefs: [] }, deps())).rejects.toThrow(/no PRs attached/);
   });
 
   it("refuses to draft a PR that isn't merged", async () => {

@@ -332,6 +332,13 @@ export async function startBot(projectId: string): Promise<void> {
         db: deps.db,
         repoTools: deps.repoTools,
         draftPr: async (prs, format) => deliverRequested(await draftPullRequests(prs, deps, { format })),
+        reviseDraft: async (instruction) => {
+          const latest = pendingDrafts(deps).at(-1);
+          if (!latest) return "there is no pending draft to change; ask for one first";
+          const { draft } = await reviseDraft(deps, latest.id, instruction);
+          await sendDraft(draft.id);
+          return `the rewritten ${draft.draft.format} was sent to the owner as a new card; the old one was replaced`;
+        },
       });
       for (const part of splitMessage(reply)) await ctx.reply(part);
     } catch (e) {

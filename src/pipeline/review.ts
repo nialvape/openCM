@@ -49,6 +49,7 @@ function setDraftStatus(deps: PipelineDeps, id: string, status: DraftStatus, ext
 function requirePending(deps: PipelineDeps, id: string): StoredDraft {
   const d = getDraft(deps, id);
   if (!d) throw new Error(`Draft ${id} not found`);
+  if (d.status === "superseded") throw new Error("That draft was replaced by a newer one. Send /drafts to see the current card.");
   if (d.status !== "pending") throw new Error(`That draft is already ${d.status}`);
   return d;
 }
