@@ -125,7 +125,7 @@ async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps,
     role: "critic",
     projectId: deps.project.id,
     task: [
-      `Review this ${draft.format} draft against the change briefs.`,
+      `Review this ${draft.format} draft against the change briefs. The project's language is ${deps.project.language}: write the fixes in it.`,
       // Without the shape the critic asked to split a single post in two, which the checks then reject.
       `The format is fixed: a ${draft.format} has ${formatSize(draft.format)}. Never suggest adding or splitting posts; if something doesn't fit, say what to drop.`,
       // Without this the critic undid the owner's own request (plural address, no "NO OFICIAL") as off-voice.
