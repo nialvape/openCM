@@ -34,6 +34,12 @@ export function xCredentialsFromEnv(env = process.env): OAuth1Credentials {
 async function check(res: Response, what: string): Promise<any> {
   const body = await res.text();
   if (res.status === 402 || res.status === 429) throw new XError(`X refused ${what} (${res.status}): spending limit or rate limit reached. ${body.slice(0, 200)}`);
+  // X says which permission the access token carries; a token made before the app had write access stays read-only.
+  if (!res.ok && res.headers.get("x-access-level") === "read" && what === "creating a post") {
+    throw new XError(
+      "X says the access token is read-only. In the X developer console set the app's permissions to 'Read and write', then regenerate the access token and secret (X_ACCESS_TOKEN, X_ACCESS_SECRET) and restart the bot.",
+    );
+  }
   if (res.status === 401 || res.status === 403) throw new XError(`X rejected the credentials for ${what} (${res.status}). Check the four X_* values and that the app has write access. ${body.slice(0, 200)}`);
   if (!res.ok) throw new XError(`X ${res.status} for ${what}: ${body.slice(0, 300)}`);
   return JSON.parse(body);

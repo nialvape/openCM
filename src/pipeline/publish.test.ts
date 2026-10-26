@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { oauth1Header } from "../channels/x/oauth1.js";
-import type { XClient } from "../channels/x/client.js";
+import { xClient, type XClient } from "../channels/x/client.js";
 import { openDb } from "../store/db.js";
 import { addEvent, getEventByPr, updateEvent } from "../store/events.js";
 import { fakeGitHub, testHarness, testProject } from "../test-helpers.js";
@@ -129,5 +129,17 @@ describe("metrics", () => {
     expect(postsDueForMetrics(d, 24, dayLater)).toEqual([]);
     const row = d.db.prepare("SELECT likes, impressions FROM post_metrics WHERE x_id = 'x1' AND after_hours = 24").get() as any;
     expect(row).toEqual({ likes: 5, impressions: 100 });
+  });
+});
+
+describe("x client", () => {
+  it("says the access token is read-only when X reports it", async () => {
+    const creds = { consumerKey: "k", consumerSecret: "s", token: "t", tokenSecret: "ts" };
+    vi.stubGlobal("fetch", async () => new Response('{"title":"Forbidden"}', { status: 403, headers: { "x-access-level": "read" } }));
+    try {
+      await expect(xClient(creds).createPost("hola")).rejects.toThrow(/read-only.*'Read and write'.*regenerate the access token/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
