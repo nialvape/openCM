@@ -27,8 +27,9 @@ questions:
         The audience notices it, but it's minor: a small fix or improvement that isn't worth a post
         alone. It goes in the next digest.
       post: >-
-        One headline change for the audience that one short post explains, even when the PR also
-        carries supporting fixes, a refactor or a version bump.
+        One headline change for the audience, told as one message: a post, continued in a reply or
+        two when it needs the room. Also when the PR carries supporting fixes, a refactor or a
+        version bump.
       thread: >-
         Two or more independent headline changes for the audience, or one that needs several steps
         to explain or to adopt (a breaking change that makes the audience do something to upgrade).

@@ -48,7 +48,11 @@ function renderPosts(d: Draft): string {
 
 export function draftCard(d: StoredDraft, events: ChangeEvent[]): { text: string; keyboard: InlineKeyboard } {
   const shown = d.final ?? d.draft;
-  const kind = shown.format === "thread" ? `THREAD of ${shown.posts.length} posts` : shown.format.toUpperCase();
+  const replies = shown.posts.length - 1;
+  const kind =
+    shown.format === "thread"
+      ? `THREAD of ${shown.posts.length} posts`
+      : `${shown.format.toUpperCase()}${shown.format === "post" && replies > 0 ? ` + ${replies} ${replies === 1 ? "reply" : "replies"} continuing it` : ""}`;
   const score = d.critique ? ` · critic ${weightedScore(d.critique)}/5` : "";
   const header = `📝 ${kind}${score}${d.final ? " · edited by you" : ""}\n${events.map((e) => `#${e.pr} ${e.title}`).join("\n")}`;
 

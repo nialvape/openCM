@@ -5,7 +5,8 @@ import type { ChangeBrief } from "../pipeline/brief.js";
 import type { Draft } from "../pipeline/draft.js";
 
 /** Posts per format the writer may produce. */
-export const POSTS_PER_FORMAT: Record<Draft["format"], [min: number, max: number]> = { post: [1, 1], thread: [2, 8], digest: [1, 4] };
+// A post may continue in a couple of replies: squeezing it into 280 characters made the writing telegraphic.
+export const POSTS_PER_FORMAT: Record<Draft["format"], [min: number, max: number]> = { post: [1, 3], thread: [2, 8], digest: [1, 4] };
 const MAX_WEIGHTED_LENGTH = 280;
 
 export interface CheckIssue {

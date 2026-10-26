@@ -70,7 +70,6 @@ const SKILL_FOR: Record<Draft["format"], string> = { post: "x-post", thread: "x-
 
 function writeTask(o: WriteOptions, deps: PipelineDeps, issues: string[]): string {
   const linkPolicy = deps.project.channels.x?.linkPolicy ?? "reply";
-  const [min, max] = POSTS_PER_FORMAT[o.format];
   const links =
     linkPolicy === "none"
       ? "Don't include any link or domain name."
@@ -82,7 +81,7 @@ function writeTask(o: WriteOptions, deps: PipelineDeps, issues: string[]): strin
           ? "Don't put links or domain names in the posts. Put the link readers need in linkReply (a reply under the last post): a specific page, never just the repo or the project's homepage."
           : "Don't include any link or domain name; leave linkReply out.";
   return [
-    `Write a ${o.format} for X about the changes in the briefs below (${min === max ? `${min} post` : `${min} to ${max} posts`}). Load the ${SKILL_FOR[o.format]} skill first.`,
+    `Write a ${o.format} for X about the changes in the briefs below (${SHAPE[o.format].writer}). Load the ${SKILL_FOR[o.format]} skill first.`,
     `Language: ${deps.project.language}. Each post at most ${X_LIMIT} characters. Before answering, measure your posts with measure_posts and shorten any that are over. ${links}`,
     'Each post lists in "claims" the changes it states, as "<pr>:<change id>" (e.g. "16:c1"). Only state what the briefs support.',
     o.extra ?? "",
@@ -115,10 +114,21 @@ async function write(o: WriteOptions, deps: PipelineDeps, issues: string[]): Pro
   return { ...rest, format: o.format, ...(o.wantsLink === true && linkReply ? { linkReply } : {}) };
 }
 
-const formatSize = (format: Draft["format"]) => {
-  const [min, max] = POSTS_PER_FORMAT[format];
-  return min === max ? `exactly ${min} post${min === 1 ? "" : "s"}` : `${min} to ${max} posts`;
+/** How many posts a format takes, as the writer and the critic are told. */
+const SHAPE: Record<Draft["format"], { writer: string; critic: string }> = {
+  post: {
+    writer: `1 post; if it doesn't read well in one, continue it in replies, up to ${POSTS_PER_FORMAT.post[1]} posts in all`,
+    critic: `A post is 1 post, continued in replies when it doesn't read well in one (up to ${POSTS_PER_FORMAT.post[1]} in all). If a post is cramped, suggest moving the rest into the next one; never ask for more than ${POSTS_PER_FORMAT.post[1]}.`,
+  },
+  thread: { writer: `${POSTS_PER_FORMAT.thread[0]} to ${POSTS_PER_FORMAT.thread[1]} posts`, critic: "" },
+  digest: { writer: `${POSTS_PER_FORMAT.digest[0]} to ${POSTS_PER_FORMAT.digest[1]} posts`, critic: "" },
 };
+
+function shapeForCritic(format: Draft["format"]): string {
+  if (SHAPE[format].critic) return SHAPE[format].critic;
+  const [min, max] = POSTS_PER_FORMAT[format];
+  return `A ${format} has ${min} to ${max} posts. Never suggest adding posts; if something doesn't fit, say what to drop.`;
+}
 
 async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps, ownerInstruction?: string): Promise<Critique> {
   const { value } = await runAgentJson(CritiqueSchema, {
@@ -127,7 +137,7 @@ async function critique(draft: Draft, briefs: ChangeBrief[], deps: PipelineDeps,
     task: [
       `Review this ${draft.format} draft against the change briefs. The project's language is ${deps.project.language}: write the fixes in it.`,
       // Without the shape the critic asked to split a single post in two, which the checks then reject.
-      `The format is fixed: a ${draft.format} has ${formatSize(draft.format)}. Never suggest adding or splitting posts; if something doesn't fit, say what to drop.`,
+      shapeForCritic(draft.format),
       // Without this the critic undid the owner's own request (plural address, no "NO OFICIAL") as off-voice.
       ownerInstruction
         ? `The maintainer asked for this version: "${ownerInstruction}". That's their decision, above the voice and the glossary: never ask to undo it.`
