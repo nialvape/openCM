@@ -4,14 +4,17 @@ description: How to write a single X post announcing a user-visible change (or a
 ---
 One message, in one post of at most 280 characters, continued in replies when it doesn't read well
 in one (three posts at most, and fewer is better). When it covers several PRs, they're one story:
-tell the result, not each PR. Several separate messages, or step-by-step explaining, is a thread.
+tell the result, not each PR.
+
+A post goes straight to the point: no hook, no build-up, no teaser. The first line is the news.
+(A story told to be read whole, opening with a hook, is a thread, not a post.)
 
 Use the next post instead of cramming. Each post is full sentences; a fragment like
 "Segundo factor: terminal o navegador" means something should move to the next post or go.
 
 Shape:
-1. Open with who it's for and what they can do now, addressed the way the voice section says
-   (person, number, tone). Lead with the reader's gain, not with what the project did.
+1. Open with the news: who it's for and what they can do now, addressed the way the voice section
+   says (person, number, tone). Lead with the reader's gain, not with what the project did.
 2. Then what they need to do or know to use it: the command, which user to enter with, where it
    works. Only what changes how they use it.
 3. A short closer if there's room: where it's available, or an invitation to try it.

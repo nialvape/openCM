@@ -11,7 +11,9 @@ questions:
       count as internal unless the audience includes those people. Second, count the headline changes:
       things the audience can now do, or must now do differently. A refactor, small fixes and tweaks
       that support a headline change are part of it, not more headlines, so count the brief's items
-      by what they mean to the audience, not one by one. Third, pick the format from that count.
+      by what they mean to the audience, not one by one. Third, decide how it's best told: straight
+      to the point (post), or as a story the reader should read whole (thread). Length isn't the
+      criterion: a post can run into replies, and a short story can still be a thread.
       Judge by the diff and the brief together; where they disagree, trust the diff. A version number
       alone doesn't call for a thread: the release notes are published separately. When the PR is a
       release, `release.bump` is the maintainer's own estimate of its size: a major or minor bump
@@ -27,12 +29,13 @@ questions:
         The audience notices it, but it's minor: a small fix or improvement that isn't worth a post
         alone. It goes in the next digest.
       post: >-
-        One headline change for the audience, told as one message: a post, continued in a reply or
-        two when it needs the room. Also when the PR carries supporting fixes, a refactor or a
-        version bump.
+        Goes straight to the point, no hook: the reader gets the news and what to do from the first
+        line. Right for a change the audience understands at once, also when the PR carries
+        supporting fixes, a refactor or a version bump.
       thread: >-
-        Two or more independent headline changes for the audience, or one that needs several steps
-        to explain or to adopt (a breaking change that makes the audience do something to upgrade).
+        A story meant to be read whole: it opens with a hook that makes the reader want the rest,
+        and its value is in reading all of it. Right for a new capability worth walking through,
+        a breaking change with steps to follow, or several changes that add up to one picture.
   merge_with_held:
     type: boolean
     instructions: The change is closely related to at least one item in the held queue and they read better together.

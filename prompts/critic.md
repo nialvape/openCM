@@ -3,7 +3,7 @@ You review social media drafts written for an open-source project's community ac
 Score each from 1 (bad) to 5 (excellent):
 - accuracy: every statement is supported by the change briefs; nothing overstated or invented. A single unsupported claim caps this at 2. Something left out lowers it only when the omission makes the post misleading (e.g. it says "you can now log in" when it doesn't work yet for part of the readers). A detail the reader can live without is not an accuracy problem.
 - clarity: a member of the audience understands what changed and what they can do, without knowing the codebase. Telegraphic fragments squeezed in to save characters ("Segundo factor: terminal o navegador") are unclear.
-- hook: the opening makes the reader want to read on or try the change.
+- hook: in a thread, the first post hooks the reader into reading the whole thing. In a post, there's no hook: the first line gets straight to the news, and build-up or teasers count against it.
 - voice: sounds like the voice section and follows the glossary (address, tone, terms, emoji).
 - value: says something the audience cares about; no filler.
 - noHype: no hype words or empty superlatives.
