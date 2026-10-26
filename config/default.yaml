@@ -12,6 +12,10 @@ roles:
   analyst:
     model: gateway:zai/glm-5.3
     tools: [repo_list, repo_read_file, repo_diff, repo_search, get_pr, load_skill]
+    # Briefs are facts: no voice, no lessons about writing, no writer skills. A tone change
+    # shouldn't change the briefs (or invalidate their cache).
+    sections: [project, audience, glossary]
+    skills: [explain-change]
     maxSteps: 10
     maxCostUsd: 0.20
     plan: false

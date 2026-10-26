@@ -3,10 +3,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { APICallError, generateText, tool, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import { z } from "zod";
 import { roleConfig, type HarnessConfig, type ReasoningEffort } from "./config.js";
-import { assemblePrompt, loadSections, type SectionName } from "./context.js";
+import { roleContext, type SectionName } from "./context.js";
 import { costUsd, resolveModel } from "./models.js";
 import { allowedTools, limitOutput, scrubSecrets } from "./policy.js";
-import { discoverSkills, skillBodies, skillsIndex, type Skill } from "./skills.js";
+import { discoverSkills, type Skill } from "./skills.js";
 import { Trace, type RunStatus } from "./trace.js";
 import { db as sharedDb, now } from "../store/db.js";
 
@@ -67,13 +67,8 @@ export async function runAgent(opts: RunOptions): Promise<RunResult> {
   const rc = roleConfig(opts.harness, opts.role);
   const model = opts.model ?? resolveModel(rc.model);
 
-  const skills = discoverSkills(opts.projectId, opts.skillRoots);
+  const { prompt, skills } = roleContext(opts.role, opts.projectId, rc, discoverSkills(opts.projectId, opts.skillRoots), opts.sections);
   const wantsSkills = rc.tools.includes("load_skill");
-  const prompt = assemblePrompt(
-    { ...loadSections(opts.role, opts.projectId), ...(wantsSkills ? { skills: skillsIndex(skills) } : {}), ...opts.sections },
-    rc,
-    wantsSkills ? skillBodies(skills) : [],
-  );
 
   let runId: string;
   let messages: ModelMessage[];

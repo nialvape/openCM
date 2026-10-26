@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { deepMerge, HarnessConfigSchema } from "./config.js";
-import { assemblePrompt } from "./context.js";
+import { assemblePrompt, roleContext } from "./context.js";
+import { paths } from "./paths.js";
 import { costUsd, modelFamily } from "./models.js";
 import { allowedTools, asUntrustedData, limitOutput, PolicyError, scrubSecrets } from "./policy.js";
 import { discoverSkills, parseSkillFile, SkillError, skillsIndex } from "./skills.js";
@@ -43,6 +44,25 @@ describe("context", () => {
     const v2 = assemblePrompt({ base: "B", skills: "- x-post: posts" }, rc, ["x-post\nAt most 280"]).harnessVersion;
     expect(v2).not.toBe(v1);
     expect(assemblePrompt({ base: "B" }, rc).harnessVersion).toBe(assemblePrompt({ base: "B" }, rc, []).harnessVersion);
+  });
+
+  it("gives a role only the sections and skills its config lists, and versions only those", () => {
+    const dir = paths.projectDir("ctx-narrow");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "audience.md"), "Estudiantes");
+    writeFileSync(join(dir, "voice.md"), "Voseo");
+    const skill = (name: string) => ({ name, description: name, source: "core" as const, dir: "", body: `body of ${name}` });
+    const skills = new Map([["explain-change", skill("explain-change")], ["x-post", skill("x-post")]]);
+    const narrow = { ...rc, tools: ["load_skill"], sections: ["audience" as const], skills: ["explain-change"] };
+
+    const before = roleContext("analyst", "ctx-narrow", narrow, skills);
+    expect(before.prompt.sections.map((s) => s.name)).toEqual(["audience", "skills"]);
+    expect([...before.skills.keys()]).toEqual(["explain-change"]);
+
+    writeFileSync(join(dir, "voice.md"), "Plural, con emojis");
+    skills.set("x-post", skill("x-post v2"));
+    expect(roleContext("analyst", "ctx-narrow", narrow, skills).prompt.harnessVersion).toBe(before.prompt.harnessVersion);
+    expect(roleContext("writer", "ctx-narrow", { ...rc, tools: ["load_skill"] }, skills).prompt.sections.map((s) => s.name)).toEqual(["audience", "voice", "skills"]);
   });
 
   it("skips empty sections", () => {

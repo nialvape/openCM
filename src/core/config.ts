@@ -19,6 +19,13 @@ export const RoleConfigSchema = z.object({
    * reasoning models draft whole threads in their thinking and count characters by hand until they run out.
    */
   reasoning: z.enum(["none", "minimal", "low", "medium", "high"]).optional(),
+  /**
+   * Project sections this role reads (base, skills and environment always go in). Omitted = all.
+   * A role that doesn't write content needs no voice: without this, a tone change re-ran the analyst.
+   */
+  sections: z.array(z.enum(["project", "audience", "voice", "glossary", "lessons"])).optional(),
+  /** Skills this role may load. Omitted = all. */
+  skills: z.array(z.string()).optional(),
 });
 
 const PriceSchema = z.object({

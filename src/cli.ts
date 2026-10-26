@@ -3,12 +3,12 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "./core/paths.js";
 import { ConfigError, loadHarnessConfig, loadProjectConfig, roleConfig } from "./core/config.js";
-import { assemblePrompt, harnessVersions, loadSections } from "./core/context.js";
+import { harnessVersions, roleContext } from "./core/context.js";
 import { loadDecisionSchema, thresholdFor } from "./core/decision.js";
 import { runAgent } from "./core/loop.js";
 import { startBot } from "./channels/telegram/bot.js";
 import { modelFamily } from "./core/models.js";
-import { discoverSkills, skillsIndex } from "./core/skills.js";
+import { discoverSkills } from "./core/skills.js";
 import { pipelineDeps } from "./pipeline/deps.js";
 import { pendingEvents, poll } from "./pipeline/watch.js";
 import { advance, draftPullRequest, maybeDigest, type Outcome } from "./pipeline/flow.js";
@@ -172,10 +172,10 @@ function doctor(projectId: string): number {
   const versions = harnessVersions(projectId, harness);
   for (const role of Object.keys(harness.roles)) {
     const rc = roleConfig(harness, role);
-    const sections = { ...loadSections(role, projectId), skills: rc.tools.includes("load_skill") ? skillsIndex(skills) : undefined };
-    const prompt = assemblePrompt(sections, rc);
+    const { prompt, skills: loadable } = roleContext(role, projectId, rc, skills);
     const names = prompt.sections.map((s) => s.name).join(", ") || "none";
-    console.log(`role ${role}: ${rc.model}, harness ${versions[role]}, sections [${names}], tools [${rc.tools.join(", ")}]`);
+    const skillNames = loadable.size ? `, skills [${[...loadable.keys()].join(", ")}]` : "";
+    console.log(`role ${role}: ${rc.model}, harness ${versions[role]}, sections [${names}], tools [${rc.tools.join(", ")}]${skillNames}`);
   }
   const formatSchema = loadDecisionSchema("content-format", projectId);
   const questions = Object.keys(formatSchema.questions)

@@ -5,7 +5,7 @@ Harness for a Community Manager agent for open-source projects. It follows a rep
 ## Layout
 
 ```
-config/default.yaml   models, tool allowlists and budgets per role — behavior lives here, not in prompts
+config/default.yaml   models, tool allowlists, budgets, prompt sections and skills per role — behavior lives here, not in prompts
 prompts/<role>.md     base system prompt of each role
 decisions/<name>.yaml decision schemas: typed questions answered by a decision model (projects can replace one)
 skills/<name>/SKILL.md  generic skills (frontmatter: name, description); loaded on demand with load_skill

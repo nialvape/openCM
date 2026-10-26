@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { paths } from "./paths.js";
 import type { HarnessConfig, RoleConfig } from "./config.js";
-import { discoverSkills, skillBodies, skillsIndex } from "./skills.js";
+import { discoverSkills, skillBodies, skillsIndex, type Skill } from "./skills.js";
 
 /**
  * The system prompt is a fixed, ordered list of named sections. Same inputs → same text → same
@@ -50,15 +50,31 @@ export function loadSections(role: string, projectId: string | undefined, extra:
   };
 }
 
+/**
+ * Everything a role's prompt is built from: its sections (narrowed by `rc.sections`) and the skills
+ * it may load (narrowed by `rc.skills`). `runAgent` and `harnessVersions` both use this, so the
+ * version always describes what the role really gets.
+ */
+export function roleContext(
+  role: string,
+  projectId: string | undefined,
+  rc: RoleConfig,
+  allSkills: Map<string, Skill>,
+  extra: Partial<Record<SectionName, string>> = {},
+): { prompt: AssembledPrompt; skills: Map<string, Skill> } {
+  const skills = rc.tools.includes("load_skill") ? new Map([...allSkills].filter(([name]) => !rc.skills || rc.skills.includes(name))) : new Map<string, Skill>();
+  const loaded = loadSections(role, projectId);
+  const kept = Object.fromEntries(
+    Object.entries(loaded).filter(([name]) => name === "base" || !rc.sections || (rc.sections as string[]).includes(name)),
+  ) as Partial<Record<SectionName, string>>;
+  const bodies = { ...kept, ...(skills.size ? { skills: skillsIndex(skills) } : {}), ...extra };
+  return { prompt: assemblePrompt(bodies, rc, skills.size ? skillBodies(skills) : []), skills };
+}
+
 /** Harness version of every role for a project, as `runAgent` would compute it. */
 export function harnessVersions(projectId: string, harness: HarnessConfig): Record<string, string> {
   const skills = discoverSkills(projectId);
-  const out: Record<string, string> = {};
-  for (const [role, rc] of Object.entries(harness.roles)) {
-    const sections = { ...loadSections(role, projectId), ...(rc.tools.includes("load_skill") ? { skills: skillsIndex(skills) } : {}) };
-    out[role] = assemblePrompt(sections, rc, rc.tools.includes("load_skill") ? skillBodies(skills) : []).harnessVersion;
-  }
-  return out;
+  return Object.fromEntries(Object.entries(harness.roles).map(([role, rc]) => [role, roleContext(role, projectId, rc, skills).prompt.harnessVersion]));
 }
 
 /**
